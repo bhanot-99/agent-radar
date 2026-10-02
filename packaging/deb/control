@@ -1,0 +1,10 @@
+Package: agent-radar
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Agent-Radar Contributors <team@agent-radar.dev>
+Description: Ultra-lightweight terminal HUD for AI coding agents
+ Agent-Radar is an ultra-lightweight, zero-privilege workspace activity HUD
+ designed to monitor, categorize, and visually stream AI CLI agent behavior
+ (Claude Code, Aider, Antigravity, Cursor) directly inside a Linux terminal.

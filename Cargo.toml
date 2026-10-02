@@ -1,0 +1,13 @@
+[package]
+name = "agent-radar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+inotify = { version = "0.11", default-features = false }
+rustix = { version = "0.38", features = ["fs", "event", "time", "process", "pipe"] }
+ratatui = "0.29"
+crossterm = "0.28"
+lru = "0.13"
+regex = "1.11"
+signal-hook = "0.3"
