@@ -78,14 +78,31 @@
   - MIT `LICENSE` and comprehensive `README.md` created with architecture overview, visual design mapping, installation guides, and SLA benchmarks.
   - Release binaries built: native and static `x86_64-unknown-linux-musl` static-PIE binary.
   - `install.sh` locally tested: installs to `~/.local/bin/agent-radar` and verifies with `--version`.
-  - **All v1 phases (Phase 0 through Phase 7) are now fully completed and verified!**
+  - All v1 phases (Phase 0 through Phase 7) fully completed and verified.
+
+- **2026-10-03** — Deep Review Remediation & Architecture Hardening:
+  - **Critical Bug 1 (AI Agent vs Runtime False Positives)**: Separated `agent_patterns` (`claude`, `aider`, `antigravity`, `cursor`, `copilot`, `gemini`) from intermediate runtimes (`python`, `node`, `bash`, `sh`). Plain `python script.py` or `node server.js` now cleanly resolves as `is_ai_agent: false`, while subprocesses spawned by agents climb `ppid` to correctly attribute ancestry.
+  - **Critical Bug 2 (Unicode TUI Panic)**: Replaced byte-slicing with Unicode-aware character/column boundary truncation and padding utility (`src/tui/unicode_util.rs`) across `hero_stream.rs`, `log_feed_table.rs`, and `header_bar.rs`. Zero panics under arbitrary CJK, emoji, and accented filenames in all terminal widths.
+  - **Critical Bug 3 (Unpaired MOVED_FROM Event Loss)**: Updated `flush_ready` to sweep expired unpaired renames (>1s) as deletion events (`FileOp::Deleted`), accurately surfacing files moved out of the workspace.
+  - **High Bug 4 (Self-Telemetry Real Metrics)**: Replaced hardcoded `cpu_pct: 0.0` and `update_sys_stats(1)` with real `CpuTracker` sampling `/proc/self/stat` (utime + stime over elapsed time) and passing actual correlator tracked PID count.
+  - **High Bug 5 (Dead Code Paths / SystemIdle)**: Initialized HUD with `ActivityCategory::SystemIdle`, emitted `SystemIdle` event upon 10s inactivity transition to `IdleCard`, and rendered `progress_pct` on `IncomingDataStream`.
+  - **High Bug 6 (Terminal Raw Mode Startup Leak)**: Added `restore_terminal()` calls to `AppRunner::new` failure path and `src/main.rs` before `exit(1)`.
+  - **High Bug 7 (O(processes × fds) Proc Scan Burst)**: Implemented candidate-first PID matching (`pid_cache` + `last_known_agent_pid`), checking ~5-10 processes in microseconds, and rate-limited full `/proc` scan to at most once per 500ms for current UID only.
+  - **Medium Bug 8 (Global Lock vs Per-Path)**: Switched single-instance lock to canonical path hash (`/tmp/agent-radar-{uid}-{hash:016x}.lock`), allowing concurrent instances on distinct workspaces.
+  - **Medium Bug 9 (Rename All Lines Added Bug)**: Transferred line count cache entries from source path to destination path during rename pairing, reporting 0 added / 0 removed for pure renames.
+  - **Medium Bug 10 (Hero Card Progress Reset)**: Preserved `started_at` and frame counter across continuous updates for the same active hero card.
+  - **Medium Bug 11 (Socket vs Disk Differentiation)**: Checked established network connections (`TCP_ESTABLISHED`, `01` in `/proc/<pid>/net/tcp`) to differentiate remote streaming from listening dev-servers.
+  - **Medium Bug 12 (Rate Tracker TTL)**: Enforced strict 30s TTL eviction on `rate_trackers` LRU cache in `flush_ready`.
+  - **Packaging (13-16)**: Added real sha256 checksum to PKGBUILD, added `%prep`/`%build`/`Source0` to RPM spec, broadened Debian control to `Architecture: any`, and added `AGENT_RADAR_REPO` override with fallback advice to `install.sh`.
+  - **Minor / Clippy**: Fixed all 15 clippy warnings; `cargo clippy --all-targets` runs with 0 warnings.
+  - **Test Suite**: Expanded test suite from 19 to 29 tests, fully covering Unicode truncation, unpaired moves, runtime ancestry walk, footer telemetry, hero persistence, and per-path locking. All 29 tests pass green.
 
 ---
 
 ## 2. Currently Working On
 
-- **Active file/task**: None — all v1 phases (Phases 0 through 7) are complete.
-- **Next expected step**: Project complete and ready for production use. Phase 8 (v2 roadmap) remains explicitly deferred per project specifications.
+- **Active file/task**: None — all 16 deep review findings resolved, verified, and tested.
+- **Next expected step**: Ready for user review and production monitoring.
 
 ---
 

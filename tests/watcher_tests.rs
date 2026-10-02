@@ -143,15 +143,30 @@ fn test_rename_cookie_pairing() {
 
 #[test]
 fn test_flock_single_instance() {
-    let lock1 = acquire_single_instance_lock();
-    assert!(lock1.is_ok(), "First lock should succeed");
+    let test_dir1 = std::env::temp_dir().join(format!("agent_radar_test_lock1_{}", std::process::id()));
+    let test_dir2 = std::env::temp_dir().join(format!("agent_radar_test_lock2_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&test_dir1);
+    let _ = std::fs::create_dir_all(&test_dir2);
 
-    let lock2 = acquire_single_instance_lock();
-    assert!(lock2.is_err(), "Second lock must fail");
+    let lock1 = acquire_single_instance_lock(&test_dir1);
+    assert!(lock1.is_ok(), "First lock on dir1 should succeed");
+
+    // Second lock on same dir must fail
+    let lock2 = acquire_single_instance_lock(&test_dir1);
+    assert!(lock2.is_err(), "Second lock on same dir must fail");
     assert_eq!(lock2.err().unwrap(), "already running");
+
+    // Lock on different dir must succeed simultaneously
+    let lock_diff = acquire_single_instance_lock(&test_dir2);
+    assert!(lock_diff.is_ok(), "Lock on different dir must succeed simultaneously");
 
     drop(lock1);
 
-    let lock3 = acquire_single_instance_lock();
+    let lock3 = acquire_single_instance_lock(&test_dir1);
     assert!(lock3.is_ok(), "Lock should succeed again after previous holder drops");
+
+    drop(lock_diff);
+    drop(lock3);
+    let _ = std::fs::remove_dir_all(&test_dir1);
+    let _ = std::fs::remove_dir_all(&test_dir2);
 }

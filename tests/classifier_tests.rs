@@ -220,3 +220,75 @@ fn test_debounce_coalescing() {
     assert_eq!(flushed.len(), 1, "Expected 1 flushed event");
     assert!(matches!(flushed[0].category, ActivityCategory::SourceCodeMutation { .. }));
 }
+
+#[test]
+fn test_unpaired_moved_from_emits_deletion() {
+    let temp = TempDir::new("unpaired_move");
+    let from_file = temp.path.join("vanished.rs");
+
+    let mut classifier = SemanticClassifier::new();
+    let cookie = 12345;
+
+    let ev_from = make_dummy_event(from_file.clone(), EventMask::MOVED_FROM, cookie, false);
+    let opt = classifier.push_event(ev_from);
+    assert!(opt.is_none(), "MOVED_FROM initially waits in pending_renames");
+
+    // Sleep > 1s for rename expiration
+    thread::sleep(Duration::from_millis(1050));
+
+    let flushed = classifier.flush_ready(Duration::from_millis(100));
+    assert_eq!(flushed.len(), 1, "Unpaired MOVED_FROM must emit a deletion event");
+    match &flushed[0].category {
+        ActivityCategory::SourceCodeMutation { lines_added, lines_removed: _, path } => {
+            assert_eq!(*lines_added, 0);
+            assert_eq!(path, &from_file.to_string_lossy().into_owned());
+        }
+        ActivityCategory::FileMutation { op, path } => {
+            assert_eq!(*op, FileOp::Deleted);
+            assert_eq!(path, &from_file.to_string_lossy().into_owned());
+        }
+        other => panic!("Expected Deleted event, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_rename_preserves_line_count_no_false_added_lines() {
+    let temp = TempDir::new("rename_diff");
+    let from_file = temp.path.join("original.rs");
+    let to_file = temp.path.join("renamed.rs");
+
+    // Write 50 lines to original file
+    let content = "println!(\"hello\");\n".repeat(50);
+    fs::write(&from_file, &content).unwrap();
+
+    let mut classifier = SemanticClassifier::new();
+
+    // 1. Initial write establishes line count of 50
+    let ev_init = make_dummy_event(from_file.clone(), EventMask::CLOSE_WRITE, 0, false);
+    let te_init = classifier.classify_direct(&ev_init, &from_file, false, FileOp::Created);
+    match te_init.category {
+        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+            assert_eq!(lines_added, 50);
+            assert_eq!(lines_removed, 0);
+        }
+        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+    }
+
+    // 2. Rename original.rs to renamed.rs (same 50 lines)
+    fs::rename(&from_file, &to_file).unwrap();
+    let cookie = 777;
+    let ev_from = make_dummy_event(from_file, EventMask::MOVED_FROM, cookie, false);
+    assert!(classifier.push_event(ev_from).is_none());
+
+    let ev_to = make_dummy_event(to_file, EventMask::MOVED_TO, cookie, false);
+    let te_renamed = classifier.push_event(ev_to).expect("Paired rename should emit event");
+
+    // 3. Renamed file has IDENTICAL lines -> must report 0 added, 0 removed! (Finding 9)
+    match te_renamed.category {
+        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+            assert_eq!(lines_added, 0, "Pure rename should not report added lines");
+            assert_eq!(lines_removed, 0, "Pure rename should not report removed lines");
+        }
+        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+    }
+}

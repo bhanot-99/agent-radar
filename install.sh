@@ -50,15 +50,27 @@ if [ -f "$LOCAL_BIN" ]; then
     cp "$LOCAL_BIN" "$DEST"
     chmod 755 "$DEST"
 else
-    # Fetch from GitHub release
-    LATEST_URL="https://github.com/agent-radar/agent-radar/releases/latest/download/agent-radar-${TARGET_ARCH}-unknown-linux-musl"
+    REPO="${AGENT_RADAR_REPO:-agent-radar/agent-radar}"
+    LATEST_URL="https://github.com/${REPO}/releases/latest/download/agent-radar-${TARGET_ARCH}-unknown-linux-musl"
     echo "[*] Downloading static binary from $LATEST_URL..."
+    DOWNLOAD_SUCCESS=0
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$LATEST_URL" -o "$DEST"
+        if curl -fsSL "$LATEST_URL" -o "$DEST"; then
+            DOWNLOAD_SUCCESS=1
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$DEST" "$LATEST_URL"
+        if wget -qO "$DEST" "$LATEST_URL"; then
+            DOWNLOAD_SUCCESS=1
+        fi
     else
         echo "[ERROR] Neither curl nor wget found in PATH." >&2
+        exit 1
+    fi
+
+    if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
+        echo "[ERROR] Failed to download prebuilt binary from $LATEST_URL" >&2
+        echo "[TIP] If prebuilt releases are not yet published for this repository, build locally with:" >&2
+        echo "      cargo build --release && ./install.sh" >&2
         exit 1
     fi
     chmod 755 "$DEST"

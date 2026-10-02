@@ -21,9 +21,14 @@ impl Drop for SingleInstanceLock {
     }
 }
 
-pub fn acquire_single_instance_lock() -> Result<SingleInstanceLock, String> {
+pub fn acquire_single_instance_lock(watch_path: &std::path::Path) -> Result<SingleInstanceLock, String> {
+    use std::hash::{Hash, Hasher};
     let uid = rustix::process::getuid().as_raw();
-    let lock_path = PathBuf::from(format!("/tmp/agent-radar-{}.lock", uid));
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let canonical = watch_path.canonicalize().unwrap_or_else(|_| watch_path.to_path_buf());
+    canonical.hash(&mut hasher);
+    let path_hash = hasher.finish();
+    let lock_path = PathBuf::from(format!("/tmp/agent-radar-{}-{:016x}.lock", uid, path_hash));
     let file = OpenOptions::new()
         .read(true)
         .write(true)

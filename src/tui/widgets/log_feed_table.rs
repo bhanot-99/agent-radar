@@ -55,19 +55,17 @@ impl<'a> Widget for LogFeedTableWidget<'a> {
             } else {
                 event.process_name.clone()
             };
-            let agent_pad = format!("{:<20}", &agent_str);
-            let agent_len = agent_pad.len().min(20);
-            buf.set_string(inner.x + 11, row_y, &agent_pad[..agent_len], Style::default().fg(TEXT_PRIMARY));
+            let safe_agent = crate::tui::unicode_util::pad_or_truncate(&agent_str, 20);
+            buf.set_string(inner.x + 11, row_y, &safe_agent, Style::default().fg(TEXT_PRIMARY));
 
             // 3. Category
             let cat_name = category_label(&event.category);
             let cat_color = category_color(&event.category);
-            let cat_pad = format!("{:<16}", cat_name);
-            let cat_len = cat_pad.len().min(16);
+            let safe_cat = crate::tui::unicode_util::pad_or_truncate(cat_name, 16);
             buf.set_string(
                 inner.x + 32,
                 row_y,
-                &cat_pad[..cat_len],
+                &safe_cat,
                 Style::default().fg(cat_color).add_modifier(Modifier::BOLD),
             );
 
@@ -76,11 +74,11 @@ impl<'a> Widget for LogFeedTableWidget<'a> {
             let available_width = inner.width.saturating_sub(50) as usize;
             if available_width > 0 {
                 let details_str = format_details(&event.category);
-                let details_len = details_str.len().min(available_width);
+                let safe_details = crate::tui::unicode_util::truncate_to_width(&details_str, available_width);
                 buf.set_string(
                     details_x,
                     row_y,
-                    &details_str[..details_len],
+                    safe_details,
                     Style::default().fg(TEXT_PRIMARY),
                 );
             }

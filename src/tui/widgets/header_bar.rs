@@ -46,18 +46,21 @@ impl<'a> Widget for HeaderBarWidget<'a> {
 
         // Render left: Watching path
         let left_str = format!(" WATCH: {} ", self.watch_path);
-        let left_len = left_str.len().min(inner.width as usize);
+        let max_w = inner.width as usize;
+        let safe_left = crate::tui::unicode_util::truncate_to_width(&left_str, max_w);
         buf.set_string(
             inner.x,
             inner.y,
-            &left_str[..left_len],
+            safe_left,
             Style::default().fg(TEXT_PRIMARY),
         );
+        let left_visual_w = unicode_width::UnicodeWidthStr::width(safe_left) as u16;
 
         // Render center/agent
         let agent_str = format!(" AGENT: {} ", agent_label);
-        let agent_x = inner.x + (inner.width / 2).saturating_sub((agent_str.len() / 2) as u16);
-        if agent_x > inner.x + left_len as u16 && agent_x + (agent_str.len() as u16) < inner.x + inner.width {
+        let agent_visual_w = unicode_width::UnicodeWidthStr::width(agent_str.as_str()) as u16;
+        let agent_x = inner.x + (inner.width / 2).saturating_sub(agent_visual_w / 2);
+        if agent_x > inner.x + left_visual_w && agent_x + agent_visual_w < inner.x + inner.width {
             buf.set_string(
                 agent_x,
                 inner.y,

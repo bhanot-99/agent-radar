@@ -25,11 +25,13 @@ fn test_agent_pattern_matching() {
     assert!(correlator.matches_agent_pattern("claude"));
     assert!(correlator.matches_agent_pattern("claude-code"));
     assert!(correlator.matches_agent_pattern("/usr/bin/aider --model gpt-4"));
-    assert!(correlator.matches_agent_pattern("python3 -m pip install"));
-    assert!(correlator.matches_agent_pattern("node dist/index.js"));
     assert!(correlator.matches_agent_pattern("antigravity"));
     assert!(correlator.matches_agent_pattern("cursor"));
+    assert!(correlator.matches_agent_pattern("gemini"));
 
+    // Plain runtimes without AI agent ancestor must NOT match agent pattern
+    assert!(!correlator.matches_agent_pattern("python3 -m pip install"));
+    assert!(!correlator.matches_agent_pattern("node dist/index.js"));
     assert!(!correlator.matches_agent_pattern("ls -la"));
     assert!(!correlator.matches_agent_pattern("cat /etc/passwd"));
     assert!(!correlator.matches_agent_pattern("grep something"));
@@ -72,4 +74,35 @@ fn test_correlate_enrichment() {
     let enriched = correlator.correlate(raw);
     assert_eq!(enriched.raw.name.as_deref(), Some("test.rs"));
     assert!(enriched.local_disk_mutation || enriched.active_network_stream);
+}
+
+#[test]
+fn test_plain_runtime_not_classified_as_ai_agent() {
+    let mut correlator = ProcessCorrelator::new();
+
+    // PID 1 (systemd/init) is a standard system daemon and must NEVER be classified as an AI agent (Finding 1)
+    let info = correlator.get_or_resolve(1).expect("PID 1 should resolve");
+    assert!(!info.is_ai_agent, "PID 1 must not be classified as AI agent");
+    assert!(info.agent_ancestor.is_none());
+
+    // Agent patterns must match real agents
+    assert!(correlator.matches_agent_pattern("claude"));
+    assert!(correlator.matches_agent_pattern("aider"));
+    assert!(correlator.matches_agent_pattern("antigravity"));
+    assert!(correlator.matches_agent_pattern("cursor"));
+
+    // Runtimes must NOT match agent pattern directly
+    assert!(!correlator.matches_agent_pattern("python3 script.py"));
+    assert!(!correlator.matches_agent_pattern("node server.js"));
+    assert!(!correlator.matches_agent_pattern("bash"));
+}
+
+#[test]
+fn test_correlator_tracked_pid_count() {
+    let mut correlator = ProcessCorrelator::new();
+    assert_eq!(correlator.tracked_pid_count(), 0);
+
+    let my_pid = process::id();
+    correlator.get_or_resolve(my_pid);
+    assert_eq!(correlator.tracked_pid_count(), 1, "Tracked PID count must increment on resolution");
 }

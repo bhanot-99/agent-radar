@@ -33,7 +33,7 @@ pub struct PendingDebounce {
 
 pub struct SemanticClassifier {
     debounce_map: HashMap<PathBuf, PendingDebounce>,
-    pending_renames: HashMap<u32, (PathBuf, Instant)>,
+    pending_renames: HashMap<u32, (PathBuf, EnrichedEvent, Instant)>,
     rate_trackers: LruCache<PathBuf, RateTrackerEntry>,
     line_counts: LruCache<PathBuf, usize>,
 }
@@ -75,13 +75,20 @@ impl SemanticClassifier {
 
         // 1. Rename-cookie pairing
         if mask.contains(EventMask::MOVED_FROM) && enriched.raw.cookie > 0 {
-            self.pending_renames.insert(enriched.raw.cookie, (path, Instant::now()));
+            self.pending_renames.insert(enriched.raw.cookie, (path, enriched, Instant::now()));
             return None;
         }
 
         if mask.contains(EventMask::MOVED_TO) && enriched.raw.cookie > 0 {
-            if let Some((_from_path, _)) = self.pending_renames.remove(&enriched.raw.cookie) {
-                // Paired atomic rename
+            if let Some((from_path, _from_enriched, _)) = self.pending_renames.remove(&enriched.raw.cookie) {
+                // Paired atomic rename:
+                // Transfer line count from old path to new path if target doesn't already have one,
+                // so a pure file rename isn't misreported as all lines added!
+                if !self.line_counts.contains(&path) {
+                    if let Some(prev) = self.line_counts.pop(&from_path) {
+                        self.line_counts.put(path.clone(), prev);
+                    }
+                }
                 return Some(self.classify_direct(&enriched, &path, is_dir, FileOp::Renamed));
             }
         }
@@ -142,8 +149,34 @@ impl SemanticClassifier {
             }
         }
 
-        // Sweep expired renames (> 1s)
-        self.pending_renames.retain(|_, (_, ts)| now.duration_since(*ts) < Duration::from_secs(1));
+        // Sweep expired unpaired renames (> 1s).
+        // If a MOVED_FROM had no matching MOVED_TO, the file was moved out of the
+        // watched workspace — classify it as a deletion!
+        let mut expired_renames = Vec::new();
+        self.pending_renames.retain(|_, (from_path, enriched, ts)| {
+            if now.duration_since(*ts) >= Duration::from_secs(1) {
+                expired_renames.push((from_path.clone(), enriched.clone()));
+                false
+            } else {
+                true
+            }
+        });
+
+        for (from_path, enriched) in expired_renames {
+            let is_dir = enriched.raw.mask.contains(EventMask::ISDIR);
+            self.line_counts.pop(&from_path);
+            let event = self.classify_direct(&enriched, &from_path, is_dir, FileOp::Deleted);
+            results.push(event);
+        }
+
+        // Enforce RATE_TRACKERS_TTL_SECS using LRU order
+        while let Some((_, entry)) = self.rate_trackers.peek_lru() {
+            if now.duration_since(entry.last_time) >= Duration::from_secs(RATE_TRACKERS_TTL_SECS) {
+                self.rate_trackers.pop_lru();
+            } else {
+                break;
+            }
+        }
 
         results
     }
@@ -170,17 +203,26 @@ impl SemanticClassifier {
                 let current_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                 let now = Instant::now();
                 let bytes_per_sec = if let Some(entry) = self.rate_trackers.get_mut(path) {
-                    let elapsed = now.duration_since(entry.last_time).as_secs_f64();
-                    let delta = current_size.saturating_sub(entry.last_size);
-                    let rate = if elapsed > 0.05 {
-                        (delta as f64 / elapsed) as u64
+                    let age = now.duration_since(entry.last_time);
+                    if age >= Duration::from_secs(RATE_TRACKERS_TTL_SECS) {
+                        // Reset expired tracker
+                        entry.last_size = current_size;
+                        entry.last_time = now;
+                        entry.bytes_per_sec = 0;
+                        0
                     } else {
-                        entry.bytes_per_sec
-                    };
-                    entry.last_size = current_size;
-                    entry.last_time = now;
-                    entry.bytes_per_sec = rate;
-                    rate
+                        let elapsed = age.as_secs_f64();
+                        let delta = current_size.saturating_sub(entry.last_size);
+                        let rate = if elapsed > 0.05 {
+                            (delta as f64 / elapsed) as u64
+                        } else {
+                            entry.bytes_per_sec
+                        };
+                        entry.last_size = current_size;
+                        entry.last_time = now;
+                        entry.bytes_per_sec = rate;
+                        rate
+                    }
                 } else {
                     self.rate_trackers.put(
                         path.to_path_buf(),
@@ -201,7 +243,12 @@ impl SemanticClassifier {
             }
             RuleVerdict::SourceCodeMutation => {
                 // Debounced line diff computation
-                let (lines_added, lines_removed) = self.compute_line_diff(path);
+                let (lines_added, lines_removed) = if op == FileOp::Deleted {
+                    let prev_lines = self.line_counts.pop(path).unwrap_or(0);
+                    (0, prev_lines)
+                } else {
+                    self.compute_line_diff(path)
+                };
                 ActivityCategory::SourceCodeMutation {
                     path: path_str,
                     lines_added,
@@ -240,5 +287,11 @@ impl SemanticClassifier {
             self.line_counts.put(path.to_path_buf(), current_lines);
             (current_lines, 0)
         }
+    }
+}
+
+impl Default for SemanticClassifier {
+    fn default() -> Self {
+        Self::new()
     }
 }

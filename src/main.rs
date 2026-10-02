@@ -71,7 +71,15 @@ fn main() {
         i += 1;
     }
 
-    let _lock = match acquire_single_instance_lock() {
+    let canonical_path = match watch_dir.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[ERROR] Cannot access path {:?}: {}", watch_dir, e);
+            std::process::exit(1);
+        }
+    };
+
+    let _lock = match acquire_single_instance_lock(&canonical_path) {
         Ok(lock) => lock,
         Err(e) => {
             if e == "already running" {
@@ -84,18 +92,11 @@ fn main() {
         }
     };
 
-    let canonical_path = match watch_dir.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[ERROR] Cannot access path {:?}: {}", watch_dir, e);
-            std::process::exit(1);
-        }
-    };
-
     let mut runner = match AppRunner::new(&canonical_path, debug_mode) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[ERROR] Failed to initialize AppRunner: {}", e);
+            restore_terminal();
             std::process::exit(1);
         }
     };

@@ -18,7 +18,7 @@ pub enum ReceivedSignal {
 impl SignalPipes {
     pub fn new() -> io::Result<Self> {
         let (signal_read_fd, signal_write_fd) = pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         register(SIGWINCH, signal_write_fd.as_raw_fd())?;
         register(SIGTERM, signal_write_fd.as_raw_fd())?;

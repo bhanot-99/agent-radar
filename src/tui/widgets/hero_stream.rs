@@ -46,11 +46,12 @@ impl<'a> Widget for HeroStreamWidget<'a> {
                     );
 
                     let path_line = format!("Path: {}", path);
-                    let path_len = path_line.len().min(inner.width.saturating_sub(2) as usize);
+                    let max_w = inner.width.saturating_sub(2) as usize;
+                    let safe_path = crate::tui::unicode_util::truncate_to_width(&path_line, max_w);
                     buf.set_string(
                         inner.x + 1,
                         inner.y + 2,
-                        &path_line[..path_len],
+                        safe_path,
                         Style::default().fg(TEXT_PRIMARY),
                     );
 
@@ -90,7 +91,7 @@ impl<'a> Widget for HeroStreamWidget<'a> {
                     return;
                 }
 
-                if let ActivityCategory::IncomingDataStream { path, bytes_per_sec, .. } = category {
+                if let ActivityCategory::IncomingDataStream { path, bytes_per_sec, progress_pct } = category {
                     let elapsed = started_at.elapsed().as_secs();
                     let speed_kb = *bytes_per_sec as f64 / 1024.0;
 
@@ -103,15 +104,20 @@ impl<'a> Widget for HeroStreamWidget<'a> {
                     );
 
                     let path_line = format!("Target: {}", path);
-                    let path_len = path_line.len().min(inner.width.saturating_sub(2) as usize);
+                    let max_w = inner.width.saturating_sub(2) as usize;
+                    let safe_path = crate::tui::unicode_util::truncate_to_width(&path_line, max_w);
                     buf.set_string(
                         inner.x + 1,
                         inner.y + 2,
-                        &path_line[..path_len],
+                        safe_path,
                         Style::default().fg(TEXT_PRIMARY),
                     );
 
-                    let speed_line = format!("Speed: {:.1} KB/s  |  Active: {}s", speed_kb, elapsed);
+                    let speed_line = if let Some(pct) = progress_pct {
+                        format!("Speed: {:.1} KB/s  |  Progress: {}%  |  Active: {}s", speed_kb, pct, elapsed)
+                    } else {
+                        format!("Speed: {:.1} KB/s  |  Active: {}s", speed_kb, elapsed)
+                    };
                     buf.set_string(
                         inner.x + 1,
                         inner.y + 3,
@@ -190,7 +196,7 @@ fn build_stream_bar(frame: usize, width: usize) -> String {
     let mut s = String::with_capacity(bar_len + 2);
     s.push('[');
     for i in 0..bar_len {
-        if (i + frame) % 4 == 0 {
+        if (i + frame).is_multiple_of(4) {
             s.push('►');
         } else {
             s.push('─');

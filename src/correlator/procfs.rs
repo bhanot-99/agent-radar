@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -20,10 +21,10 @@ pub fn read_process_info(pid: u32) -> io::Result<ProcessInfo> {
     let mut ppid = 0u32;
 
     for line in status_str.lines() {
-        if line.starts_with("Name:") {
-            name = line["Name:".len()..].trim().to_string();
-        } else if line.starts_with("PPid:") {
-            ppid = line["PPid:".len()..].trim().parse().unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("Name:") {
+            name = stripped.trim().to_string();
+        } else if let Some(stripped) = line.strip_prefix("PPid:") {
+            ppid = stripped.trim().parse().unwrap_or(0);
         }
     }
 
@@ -58,7 +59,7 @@ pub fn read_process_info(pid: u32) -> io::Result<ProcessInfo> {
 // so we find the last ')' and parse remaining fields from there.
 fn parse_start_time(stat: &str) -> Option<u64> {
     let close_paren = stat.rfind(')')?;
-    let after_paren = &stat[close_paren + 1..].trim_start();
+    let after_paren = stat[close_paren + 1..].trim_start();
     let fields: Vec<&str> = after_paren.split_whitespace().collect();
     // After '(comm)' which is field 2:
     // field 3 (state) is index 0
@@ -81,6 +82,25 @@ pub fn is_process_alive(pid: u32, recorded_start_time: u64) -> bool {
 }
 
 pub fn has_active_socket(pid: u32) -> bool {
+    // Check if process has an established network connection (01 = TCP_ESTABLISHED)
+    if let Ok(tcp_str) = fs::read_to_string(format!("/proc/{}/net/tcp", pid)) {
+        for line in tcp_str.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() > 3 && fields[3] == "01" {
+                return true;
+            }
+        }
+    }
+    if let Ok(tcp6_str) = fs::read_to_string(format!("/proc/{}/net/tcp6", pid)) {
+        for line in tcp6_str.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() > 3 && fields[3] == "01" {
+                return true;
+            }
+        }
+    }
+
+    // Secondary check: verify socket fd exists
     let fd_dir = format!("/proc/{}/fd", pid);
     if let Ok(entries) = fs::read_dir(fd_dir) {
         for entry in entries.flatten() {
@@ -95,26 +115,58 @@ pub fn has_active_socket(pid: u32) -> bool {
     false
 }
 
-pub fn find_pid_accessing_path(target_path: &Path) -> Option<u32> {
-    let canonical = target_path.canonicalize().ok().unwrap_or_else(|| target_path.to_path_buf());
-    
-    // Read /proc entries to search own processes
+pub fn check_pid_accessing_path(pid: u32, target_path: &Path, canonical: &Path) -> bool {
+    let fd_dir = format!("/proc/{}/fd", pid);
+    if let Ok(fds) = fs::read_dir(fd_dir) {
+        for fd_entry in fds.flatten() {
+            if let Ok(link) = fs::read_link(fd_entry.path()) {
+                if link == canonical || link == target_path {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn find_pid_accessing_path_with_candidates(
+    target_path: &Path,
+    candidates: &[u32],
+    own_uid: u32,
+) -> Option<u32> {
+    let canonical = target_path.canonicalize().unwrap_or_else(|_| target_path.to_path_buf());
+
+    // 1. Fast path: check candidate PIDs directly (O(candidates * fds) ~ 10-50 microseconds)
+    for &pid in candidates {
+        if check_pid_accessing_path(pid, target_path, &canonical) {
+            return Some(pid);
+        }
+    }
+
+    // 2. Slow path: scan own user's processes in /proc
     let proc_entries = fs::read_dir("/proc").ok()?;
     for entry in proc_entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if let Ok(pid) = name_str.parse::<u32>() {
-            let fd_dir = format!("/proc/{}/fd", pid);
-            if let Ok(fds) = fs::read_dir(fd_dir) {
-                for fd_entry in fds.flatten() {
-                    if let Ok(link) = fs::read_link(fd_entry.path()) {
-                        if link == canonical || link == target_path {
-                            return Some(pid);
-                        }
-                    }
+            if candidates.contains(&pid) {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                if meta.uid() != own_uid {
+                    continue;
                 }
+            }
+            if check_pid_accessing_path(pid, target_path, &canonical) {
+                return Some(pid);
             }
         }
     }
+
     None
+}
+
+pub fn find_pid_accessing_path(target_path: &Path) -> Option<u32> {
+    let own_uid = rustix::process::getuid().as_raw();
+    find_pid_accessing_path_with_candidates(target_path, &[], own_uid)
 }

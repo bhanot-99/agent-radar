@@ -1,4 +1,5 @@
 pub mod theme;
+pub mod unicode_util;
 pub mod widgets {
     pub mod header_bar;
     pub mod hero_stream;
@@ -75,23 +76,85 @@ pub struct TuiState {
     pub active_hero: Option<HeroCardType>,
     pub fps_counter: FpsTracker,
     pub system_metrics: SysStats,
+    pub cpu_tracker: CpuTracker,
     pub active_agent: Option<String>,
     pub watch_path: String,
     pub is_budget_exceeded: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct CpuTracker {
+    last_sample_time: Instant,
+    last_cpu_ticks: u64,
+    current_cpu_pct: f64,
+}
+
+impl Default for CpuTracker {
+    fn default() -> Self {
+        Self {
+            last_sample_time: Instant::now(),
+            last_cpu_ticks: read_self_cpu_ticks().unwrap_or(0),
+            current_cpu_pct: 0.0,
+        }
+    }
+}
+
+impl CpuTracker {
+    pub fn sample(&mut self) -> f64 {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_sample_time).as_secs_f64();
+        if elapsed >= 0.2 {
+            if let Some(ticks) = read_self_cpu_ticks() {
+                let delta_ticks = ticks.saturating_sub(self.last_cpu_ticks);
+                // System clock ticks per second on Linux is 100 (CLK_TCK)
+                let cpu = (delta_ticks as f64 / 100.0) / elapsed * 100.0;
+                self.current_cpu_pct = cpu.clamp(0.0, 100.0);
+                self.last_cpu_ticks = ticks;
+                self.last_sample_time = now;
+            }
+        }
+        self.current_cpu_pct
+    }
+}
+
+fn read_self_cpu_ticks() -> Option<u64> {
+    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+    let close_paren = stat.rfind(')')?;
+    let after_paren = stat[close_paren + 1..].trim_start();
+    let fields: Vec<&str> = after_paren.split_whitespace().collect();
+    // After '(comm)' field 2:
+    // field 14 (utime) is index 11
+    // field 15 (stime) is index 12
+    if fields.len() > 12 {
+        let utime = fields[11].parse::<u64>().ok()?;
+        let stime = fields[12].parse::<u64>().ok()?;
+        Some(utime + stime)
+    } else {
+        None
+    }
+}
+
 impl TuiState {
     pub fn new(watch_path: &str, is_budget_exceeded: bool) -> Self {
-        Self {
+        let mut state = Self {
             events: VecDeque::with_capacity(500),
             max_events: 500,
             active_hero: Some(HeroCardType::IdleCard),
             fps_counter: FpsTracker::default(),
             system_metrics: SysStats::default(),
+            cpu_tracker: CpuTracker::default(),
             active_agent: None,
             watch_path: watch_path.to_string(),
             is_budget_exceeded,
-        }
+        };
+        state.push_event(TelemetryEvent {
+            timestamp: std::time::SystemTime::now(),
+            pid: std::process::id(),
+            ppid: 0,
+            process_name: "system".to_string(),
+            category: crate::events::ActivityCategory::SystemIdle,
+        });
+        state
     }
 
     pub fn push_event(&mut self, event: TelemetryEvent) {
@@ -99,29 +162,47 @@ impl TuiState {
             self.events.pop_back();
         }
 
-        if event.process_name != "background-io" {
+        if event.process_name != "background-io" && event.process_name != "system" {
             self.active_agent = Some(event.process_name.clone());
         }
 
         let now = Instant::now();
 
-        // Check if event triggers a Hero Card
+        // Check if event triggers a Hero Card, preserving started_at across updates
         match &event.category {
             crate::events::ActivityCategory::ModelTrainingCheckpoint { .. } => {
-                self.active_hero = Some(HeroCardType::ModelTrainingCard {
-                    category: event.category.clone(),
-                    started_at: now,
-                    last_updated: now,
-                    frame: 0,
-                });
+                if let Some(HeroCardType::ModelTrainingCard {
+                    ref mut category,
+                    ref mut last_updated,
+                    ..
+                }) = self.active_hero {
+                    *category = event.category.clone();
+                    *last_updated = now;
+                } else {
+                    self.active_hero = Some(HeroCardType::ModelTrainingCard {
+                        category: event.category.clone(),
+                        started_at: now,
+                        last_updated: now,
+                        frame: 0,
+                    });
+                }
             }
             crate::events::ActivityCategory::IncomingDataStream { .. } => {
-                self.active_hero = Some(HeroCardType::DataStreamCard {
-                    category: event.category.clone(),
-                    started_at: now,
-                    last_updated: now,
-                    frame: 0,
-                });
+                if let Some(HeroCardType::DataStreamCard {
+                    ref mut category,
+                    ref mut last_updated,
+                    ..
+                }) = self.active_hero {
+                    *category = event.category.clone();
+                    *last_updated = now;
+                } else {
+                    self.active_hero = Some(HeroCardType::DataStreamCard {
+                        category: event.category.clone(),
+                        started_at: now,
+                        last_updated: now,
+                        frame: 0,
+                    });
+                }
             }
             _ => {}
         }
@@ -136,8 +217,15 @@ impl TuiState {
                 hero.advance_frame();
                 state_changed = true;
             } else if !matches!(hero, HeroCardType::IdleCard) {
-                // Animation completed; revert to quiet IdleCard
+                // Animation completed; revert to quiet IdleCard and record SystemIdle event
                 *hero = HeroCardType::IdleCard;
+                self.push_event(TelemetryEvent {
+                    timestamp: std::time::SystemTime::now(),
+                    pid: std::process::id(),
+                    ppid: 0,
+                    process_name: "system".to_string(),
+                    category: crate::events::ActivityCategory::SystemIdle,
+                });
                 state_changed = true;
             }
         }
@@ -152,14 +240,22 @@ impl TuiState {
     }
 
     pub fn update_sys_stats(&mut self, tracked_pids: usize) {
-        self.system_metrics = read_self_sys_stats(tracked_pids);
+        let cpu_pct = self.cpu_tracker.sample() as f32;
+        let rss_bytes = read_self_rss().unwrap_or(0);
+        self.system_metrics = SysStats {
+            cpu_pct,
+            rss_bytes,
+            tracked_pids,
+        };
     }
 }
 
 pub fn read_self_sys_stats(tracked_pids: usize) -> SysStats {
+    let mut tracker = CpuTracker::default();
+    let cpu_pct = tracker.sample() as f32;
     let rss_bytes = read_self_rss().unwrap_or(0);
     SysStats {
-        cpu_pct: 0.0,
+        cpu_pct,
         rss_bytes,
         tracked_pids,
     }

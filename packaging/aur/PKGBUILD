@@ -10,7 +10,7 @@ provides=('agent-radar')
 conflicts=('agent-radar')
 source_x86_64=("${url}/releases/download/v${pkgver}/agent-radar-x86_64-unknown-linux-musl")
 source_aarch64=("${url}/releases/download/v${pkgver}/agent-radar-aarch64-unknown-linux-musl")
-sha256sums_x86_64=('SKIP')
+sha256sums_x86_64=('71f9407e8e75dae09d76c8120511587a9fc14f744cb13f2181d517794d3f984c')
 sha256sums_aarch64=('SKIP')
 
 package() {

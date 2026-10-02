@@ -44,10 +44,10 @@ impl AppRunner {
         let timerfd = timerfd_create(
             TimerfdClockId::Monotonic,
             TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ).map_err(io::Error::other)?;
 
         let epoll_fd = epoll::create(epoll::CreateFlags::CLOEXEC)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
 
         // Register inotify fd
         epoll::add(
@@ -55,7 +55,7 @@ impl AppRunner {
             unsafe { rustix::fd::BorrowedFd::borrow_raw(watcher.poll_fd()) },
             epoll::EventData::new_u64(TAG_INOTIFY),
             epoll::EventFlags::IN,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ).map_err(io::Error::other)?;
 
         // Register signal pipe
         epoll::add(
@@ -63,7 +63,7 @@ impl AppRunner {
             &signal_pipes.signal_read_fd,
             epoll::EventData::new_u64(TAG_SIGNAL),
             epoll::EventFlags::IN,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ).map_err(io::Error::other)?;
 
         // Register timerfd
         epoll::add(
@@ -71,18 +71,27 @@ impl AppRunner {
             &timerfd,
             epoll::EventData::new_u64(TAG_TIMER),
             epoll::EventFlags::IN,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ).map_err(io::Error::other)?;
 
         let terminal = if !debug_mode {
             let mut stdout = io::stdout();
             crossterm::terminal::enable_raw_mode()?;
-            crossterm::execute!(
+            if let Err(e) = crossterm::execute!(
                 stdout,
                 crossterm::terminal::EnterAlternateScreen,
                 crossterm::cursor::Hide
-            )?;
+            ) {
+                let _ = crossterm::terminal::disable_raw_mode();
+                return Err(e);
+            }
             let backend = CrosstermBackend::new(stdout);
-            Some(Terminal::new(backend)?)
+            match Terminal::new(backend) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    crate::restore_terminal();
+                    return Err(e);
+                }
+            }
         } else {
             None
         };
@@ -110,7 +119,7 @@ impl AppRunner {
             it_value: Timespec { tv_sec: sec, tv_nsec: nsec },
         };
         timerfd_settime(&self.timerfd, TimerfdTimerFlags::empty(), &spec)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         self.is_timer_armed = true;
         Ok(())
     }
@@ -124,7 +133,7 @@ impl AppRunner {
             it_value: Timespec { tv_sec: 0, tv_nsec: 0 },
         };
         timerfd_settime(&self.timerfd, TimerfdTimerFlags::empty(), &spec)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         self.is_timer_armed = false;
         Ok(())
     }
@@ -149,7 +158,8 @@ impl AppRunner {
 
     fn redraw_if_needed(&mut self) -> io::Result<()> {
         if let Some(ref mut term) = self.terminal {
-            self.tui_state.update_sys_stats(1);
+            let tracked = self.correlator.tracked_pid_count();
+            self.tui_state.update_sys_stats(tracked);
             self.tui_state.fps_counter.frame_count += 1;
             term.draw(|f| render_hud(f, &self.tui_state))?;
         }
@@ -186,7 +196,7 @@ impl AppRunner {
             match epoll::wait(&self.epoll_fd, &mut event_vec, timeout_ms) {
                 Ok(()) => {}
                 Err(rustix::io::Errno::INTR) => continue,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                Err(e) => return Err(io::Error::other(e)),
             }
 
             let mut state_changed = false;
