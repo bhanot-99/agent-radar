@@ -108,7 +108,22 @@ impl<'a> Widget for HeroStreamWidget<'a> {
                     ActivityCategory::MassDeletion { count, .. } => {
                         format!("Burst: {} deletions  |  Active: {}s", count, elapsed)
                     }
-                    _ => format!("Active: {}s", elapsed),
+                    ActivityCategory::ImageAsset { .. }
+                    | ActivityCategory::AudioAsset { .. }
+                    | ActivityCategory::VideoAsset { .. }
+                    | ActivityCategory::FontAsset { .. }
+                    | ActivityCategory::NotebookActivity { .. }
+                    | ActivityCategory::ModelConfigEdit { .. }
+                    | ActivityCategory::ArchiveWrite { .. }
+                    | ActivityCategory::GitOperation { .. }
+                    | ActivityCategory::DependencyLockUpdate { .. }
+                    | ActivityCategory::TestFileActivity { .. }
+                    | ActivityCategory::EnvSecretChange { .. }
+                    | ActivityCategory::CiPipelineEdit { .. }
+                    | ActivityCategory::ContainerConfigEdit { .. }
+                    | ActivityCategory::WorkspaceExpansion { .. }
+                    | ActivityCategory::FileMutation { .. }
+                    | ActivityCategory::SystemIdle => format!("Active: {}s", elapsed),
                 };
                 buf.set_string(
                     inner.x + 1,
@@ -134,7 +149,7 @@ impl<'a> Widget for HeroStreamWidget<'a> {
                     );
                 }
             }
-            _ => {
+            Some(HeroCardType::IdleCard) | None => {
                 // Static Idle Card
                 let block = Block::default()
                     .borders(Borders::ALL)

@@ -12,7 +12,7 @@ license=('MIT')
 provides=('agent-radar')
 conflicts=('agent-radar')
 source_x86_64=("${url}/releases/download/v${pkgver}/agent-radar-x86_64-unknown-linux-musl")
-sha256sums_x86_64=('881cae175563a013598a1381b7f6a244322addccf5519c1df90d128714c37b44')
+sha256sums_x86_64=('b69bc63c0a9932a0c817074a36641ea2f4b829ce9290c60db430d412f4ec4c75')
 
 package() {
     install -Dm755 "${srcdir}/agent-radar-${CARCH}-unknown-linux-musl" "${pkgdir}/usr/bin/agent-radar"
