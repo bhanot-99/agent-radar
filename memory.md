@@ -99,6 +99,6 @@
 
 ## 4. Open Questions / Flags for the User
 
-- Confirm target users (PRD.md §2) match actual intent — currently inferred, not explicitly stated.
-- Confirm the color palette in `design.md` §1.2 reads well in the user's actual terminal color profile once Phase 4/5 produces a renderable HUD (TrueColor rendering can shift slightly across terminal emulators).
-- No git repository exists yet in `/home/bhanotos/Reporter` — decide whether to `git init` before Phase 0, or scaffold the Rust project in a separate repo/directory.
+- Confirm target users (PRD.md §2) match actual intent — currently inferred from the problem framing in overview.md §1.
+- Confirm the color palette in design.md §1.2 reads well in the user's actual terminal color profile (TrueColor rendering can shift slightly across terminal emulators).
+- Git repository is initialized with master branch, tracking all v1 implementation work and packaging files.
