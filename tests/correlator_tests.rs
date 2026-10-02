@@ -52,10 +52,20 @@ fn test_pid_cache_resolution() {
 }
 
 #[test]
-fn test_has_active_socket_does_not_panic() {
+fn test_has_active_socket_accuracy() {
     let my_pid = process::id();
-    // Own process socket check should run without panic
-    let _ = has_active_socket(my_pid);
+
+    // Establish a real TCP connection within this process
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind listener");
+    let addr = listener.local_addr().expect("local addr");
+    let stream = std::net::TcpStream::connect(addr).expect("connect TCP stream");
+    let (_accepted, _) = listener.accept().expect("accept TCP");
+
+    // Cross-referencing must detect THIS PID's established socket
+    assert!(has_active_socket(my_pid), "Must detect active established TCP socket for own PID");
+
+    drop(stream);
+    drop(listener);
 }
 
 #[test]

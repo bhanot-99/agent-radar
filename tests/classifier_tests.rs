@@ -292,3 +292,70 @@ fn test_rename_preserves_line_count_no_false_added_lines() {
         other => panic!("Expected SourceCodeMutation, got {:?}", other),
     }
 }
+
+#[test]
+fn test_incoming_data_stream_progress_percentage() {
+    let temp = TempDir::new("stream_prog");
+    let file_path = temp.path.join("large_dataset.parquet");
+    let meta_path = temp.path.join("large_dataset.parquet.size");
+
+    // Total expected size is 1,000,000 bytes
+    fs::write(&meta_path, "1000000").unwrap();
+    // Current written size is 250,000 bytes (25%)
+    let data = vec![0u8; 250_000];
+    fs::write(&file_path, &data).unwrap();
+
+    let mut classifier = SemanticClassifier::new();
+    let ev = make_dummy_event(file_path.clone(), EventMask::MODIFY, 0, true);
+    let te = classifier.classify_direct(&ev, &file_path, false, FileOp::Modified);
+
+    match te.category {
+        ActivityCategory::IncomingDataStream { progress_pct, .. } => {
+            assert_eq!(progress_pct, Some(25), "Expected progress_pct to be 25%");
+        }
+        other => panic!("Expected IncomingDataStream, got {:?}", other),
+    }
+
+    // Now update file to 750,000 bytes total (75%)
+    let data75 = vec![0u8; 750_000];
+    fs::write(&file_path, &data75).unwrap();
+
+    let ev2 = make_dummy_event(file_path.clone(), EventMask::MODIFY, 0, true);
+    let te2 = classifier.classify_direct(&ev2, &file_path, false, FileOp::Modified);
+
+    match te2.category {
+        ActivityCategory::IncomingDataStream { progress_pct, .. } => {
+            assert_eq!(progress_pct, Some(75), "Expected progress_pct to be 75%");
+        }
+        other => panic!("Expected IncomingDataStream, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_incoming_data_stream_sparse_preallocation_progress() {
+    use std::io::{Seek, SeekFrom, Write};
+    let temp = TempDir::new("stream_sparse");
+    let file_path = temp.path.join("sparse_download.parquet");
+
+    // Pre-allocate a 10MB sparse download file and write 1MB into it
+    let mut f = fs::File::create(&file_path).unwrap();
+    f.seek(SeekFrom::Start(10_000_000 - 1)).unwrap();
+    f.write_all(b"\0").unwrap();
+    f.seek(SeekFrom::Start(0)).unwrap();
+    f.write_all(&vec![b'x'; 1_000_000]).unwrap();
+    f.flush().unwrap();
+
+    let mut classifier = SemanticClassifier::new();
+    let ev = make_dummy_event(file_path.clone(), EventMask::MODIFY, 0, true);
+    let te = classifier.classify_direct(&ev, &file_path, false, FileOp::Modified);
+
+    match te.category {
+        ActivityCategory::IncomingDataStream { progress_pct, .. } => {
+            assert!(progress_pct.is_some(), "Progress percentage must be detected for sparse pre-allocation");
+            let pct = progress_pct.unwrap();
+            // 1MB out of 10MB is approximately 10%
+            assert!((9..=11).contains(&pct), "Expected progress around 10%, got {}%", pct);
+        }
+        other => panic!("Expected IncomingDataStream, got {:?}", other),
+    }
+}

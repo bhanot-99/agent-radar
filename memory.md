@@ -91,18 +91,18 @@
   - **Medium Bug 8 (Global Lock vs Per-Path)**: Switched single-instance lock to canonical path hash (`/tmp/agent-radar-{uid}-{hash:016x}.lock`), allowing concurrent instances on distinct workspaces.
   - **Medium Bug 9 (Rename All Lines Added Bug)**: Transferred line count cache entries from source path to destination path during rename pairing, reporting 0 added / 0 removed for pure renames.
   - **Medium Bug 10 (Hero Card Progress Reset)**: Preserved `started_at` and frame counter across continuous updates for the same active hero card.
-  - **Medium Bug 11 (Socket vs Disk Differentiation)**: Checked established network connections (`TCP_ESTABLISHED`, `01` in `/proc/<pid>/net/tcp`) to differentiate remote streaming from listening dev-servers.
-  - **Medium Bug 12 (Rate Tracker TTL)**: Enforced strict 30s TTL eviction on `rate_trackers` LRU cache in `flush_ready`.
-  - **Packaging (13-16)**: Added real sha256 checksum to PKGBUILD, added `%prep`/`%build`/`Source0` to RPM spec, broadened Debian control to `Architecture: any`, and added `AGENT_RADAR_REPO` override with fallback advice to `install.sh`.
+  - **Medium Bug 11 (Socket vs Disk Differentiation & Strict Namespace Scoping)**: Fixed network namespace scoping issue where `/proc/<pid>/net/tcp` reflected the whole host namespace. Implemented precise per-PID socket resolution by reading `/proc/<pid>/fd/*`, extracting `socket:[<inode>]`, and cross-referencing against `/proc/net/tcp`, `/proc/net/tcp6`, `/proc/net/udp`, `/proc/net/udp6` requiring state `01` (`TCP_ESTABLISHED`). Removed broad fallback heuristics so only processes with established network sockets trigger `IncomingDataStream`.
+  - **High Bug 5 (Progress Percentage Calculation & Dead Code Paths)**: Populated `progress_pct` with real calculations in `classify_direct`. Supports both sibling metadata (`.size`, `.metadata`, `.json`, directory manifests) and sparse pre-allocation detection (`st_blocks * 512 < st_size`), accurately computing physical bytes written against target logical size. Initialized HUD with `ActivityCategory::SystemIdle` and emitted `SystemIdle` on idle transitions.
+  - **Packaging (13-16 & Upstream Overrides)**: Closed supply-chain gap in `packaging/aur/PKGBUILD` by removing unhashed aarch64 `SKIP` from the binary package and adding `packaging/aur/PKGBUILD.src` for native multi-arch builds (`x86_64` and `aarch64`) via `cargo build --release --locked`. Updated `PKGBUILD`, `agent-radar.spec`, and `install.sh` to support configurable upstream repository origins (`AGENT_RADAR_REPO` and `--define 'agent_radar_repo ...'`).
   - **Minor / Clippy**: Fixed all 15 clippy warnings; `cargo clippy --all-targets` runs with 0 warnings.
-  - **Test Suite**: Expanded test suite from 19 to 29 tests, fully covering Unicode truncation, unpaired moves, runtime ancestry walk, footer telemetry, hero persistence, and per-path locking. All 29 tests pass green.
+  - **Test Suite**: Expanded test suite to 31 unit and integration tests, covering Unicode truncation, unpaired moves, runtime ancestry walk, footer telemetry, hero persistence, per-path locking, active TCP socket PID scoping, and sparse/metadata progress calculation. All 31 tests pass green.
 
 ---
 
 ## 2. Currently Working On
 
-- **Active file/task**: None — all 16 deep review findings resolved, verified, and tested.
-- **Next expected step**: Ready for user review and production monitoring.
+- **Active file/task**: Fully verified all 16 deep review findings. All tests passing (31/31), 0 clippy warnings, release and musl binaries built.
+- **Next expected step**: Completed. Ready for user feedback and deployment.
 
 ---
 

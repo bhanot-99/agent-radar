@@ -1,0 +1,26 @@
+# Maintainer: Agent-Radar Contributors <team@agent-radar.dev>
+_repo="${AGENT_RADAR_REPO:-agent-radar/agent-radar}"
+pkgname=agent-radar
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Ultra-lightweight, zero-privilege terminal HUD for AI coding agents"
+arch=('x86_64' 'aarch64')
+url="https://github.com/${_repo}"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo' 'rust')
+provides=('agent-radar')
+conflicts=('agent-radar-bin')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+
+build() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+    cargo build --release --locked
+}
+
+package() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+    install -Dm755 "target/release/agent-radar" "${pkgdir}/usr/bin/agent-radar"
+    install -Dm644 "README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+    install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

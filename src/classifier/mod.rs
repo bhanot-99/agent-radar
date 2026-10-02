@@ -21,6 +21,7 @@ pub struct RateTrackerEntry {
     pub last_size: u64,
     pub last_time: Instant,
     pub bytes_per_sec: u64,
+    pub expected_size: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,8 +201,36 @@ impl SemanticClassifier {
                 }
             }
             RuleVerdict::IncomingDataStream => {
-                let current_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                use std::os::unix::fs::MetadataExt;
+                let (current_size, sparse_expected) = if let Ok(m) = fs::metadata(path) {
+                    let logical = m.size();
+                    let allocated = m.blocks() * 512;
+                    if logical > 0 && allocated > 0 && allocated < logical {
+                        (allocated, Some(logical))
+                    } else {
+                        (logical, None)
+                    }
+                } else {
+                    (0, None)
+                };
                 let now = Instant::now();
+
+                let expected_size = sparse_expected
+                    .or_else(|| {
+                        self.rate_trackers
+                            .get(path)
+                            .and_then(|e| e.expected_size)
+                    })
+                    .or_else(|| detect_expected_size(path));
+
+                let progress_pct = expected_size.map(|exp| {
+                    if exp > 0 {
+                        ((current_size as f64 / exp as f64) * 100.0).clamp(0.0, 100.0) as u8
+                    } else {
+                        100
+                    }
+                });
+
                 let bytes_per_sec = if let Some(entry) = self.rate_trackers.get_mut(path) {
                     let age = now.duration_since(entry.last_time);
                     if age >= Duration::from_secs(RATE_TRACKERS_TTL_SECS) {
@@ -209,6 +238,7 @@ impl SemanticClassifier {
                         entry.last_size = current_size;
                         entry.last_time = now;
                         entry.bytes_per_sec = 0;
+                        entry.expected_size = expected_size;
                         0
                     } else {
                         let elapsed = age.as_secs_f64();
@@ -221,6 +251,9 @@ impl SemanticClassifier {
                         entry.last_size = current_size;
                         entry.last_time = now;
                         entry.bytes_per_sec = rate;
+                        if expected_size.is_some() {
+                            entry.expected_size = expected_size;
+                        }
                         rate
                     }
                 } else {
@@ -230,6 +263,7 @@ impl SemanticClassifier {
                             last_size: current_size,
                             last_time: now,
                             bytes_per_sec: 0,
+                            expected_size,
                         },
                     );
                     0
@@ -238,7 +272,7 @@ impl SemanticClassifier {
                 ActivityCategory::IncomingDataStream {
                     path: path_str,
                     bytes_per_sec,
-                    progress_pct: None,
+                    progress_pct,
                 }
             }
             RuleVerdict::SourceCodeMutation => {
@@ -294,4 +328,63 @@ impl Default for SemanticClassifier {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub fn detect_expected_size(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    // 1. Check sparse pre-allocation (allocated blocks < logical length)
+    if let Ok(meta) = fs::metadata(path) {
+        let logical_size = meta.size();
+        let allocated_bytes = meta.blocks() * 512;
+        if logical_size > 0 && allocated_bytes > 0 && allocated_bytes < logical_size {
+            return Some(logical_size);
+        }
+    }
+
+    // 2. Check sibling metadata: <path>.size, <path>.metadata, <path>.json, <stem>.size, etc.
+    let path_str = path.to_string_lossy();
+    let mut candidate_paths = vec![
+        PathBuf::from(format!("{}.size", path_str)),
+        PathBuf::from(format!("{}.metadata", path_str)),
+        PathBuf::from(format!("{}.json", path_str)),
+        path.with_extension("size"),
+        path.with_extension("metadata"),
+        path.with_extension("json"),
+    ];
+
+    if let Some(stem) = path.file_stem() {
+        let stem_path = path.with_file_name(stem);
+        candidate_paths.push(stem_path.with_extension("size"));
+        candidate_paths.push(stem_path.with_extension("json"));
+    }
+
+    if let Some(parent) = path.parent() {
+        candidate_paths.push(parent.join("dataset_info.json"));
+        candidate_paths.push(parent.join("manifest.json"));
+    }
+
+    for candidate in &candidate_paths {
+        if let Ok(content) = fs::read_to_string(candidate) {
+            let trimmed = content.trim();
+            if let Ok(bytes) = trimmed.parse::<u64>() {
+                if bytes > 0 {
+                    return Some(bytes);
+                }
+            }
+            for key in ["\"size\":", "\"total_bytes\":", "\"content_length\":", "\"download_size\":", "\"dataset_size\":", "\"file_size\":"] {
+                if let Some(pos) = content.find(key) {
+                    let after = &content[pos + key.len()..].trim_start();
+                    let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+                    if let Ok(bytes) = after[..end].parse::<u64>() {
+                        if bytes > 0 {
+                            return Some(bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }

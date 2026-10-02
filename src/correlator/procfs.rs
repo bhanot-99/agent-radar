@@ -82,32 +82,48 @@ pub fn is_process_alive(pid: u32, recorded_start_time: u64) -> bool {
 }
 
 pub fn has_active_socket(pid: u32) -> bool {
-    // Check if process has an established network connection (01 = TCP_ESTABLISHED)
-    if let Ok(tcp_str) = fs::read_to_string(format!("/proc/{}/net/tcp", pid)) {
-        for line in tcp_str.lines().skip(1) {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() > 3 && fields[3] == "01" {
-                return true;
-            }
-        }
-    }
-    if let Ok(tcp6_str) = fs::read_to_string(format!("/proc/{}/net/tcp6", pid)) {
-        for line in tcp6_str.lines().skip(1) {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() > 3 && fields[3] == "01" {
-                return true;
-            }
-        }
-    }
-
-    // Secondary check: verify socket fd exists
     let fd_dir = format!("/proc/{}/fd", pid);
+    let mut socket_inodes = Vec::new();
+
     if let Ok(entries) = fs::read_dir(fd_dir) {
         for entry in entries.flatten() {
             if let Ok(target) = fs::read_link(entry.path()) {
                 let target_str = target.to_string_lossy();
-                if target_str.starts_with("socket:[") {
-                    return true;
+                if let Some(rest) = target_str.strip_prefix("socket:[") {
+                    if let Some(inode_str) = rest.strip_suffix(']') {
+                        if let Ok(inode) = inode_str.parse::<u64>() {
+                            socket_inodes.push(inode);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if socket_inodes.is_empty() {
+        return false;
+    }
+
+    // Cross-reference this PID's own socket inodes against network connection tables.
+    // Only return true if one of THIS PID's own sockets has state 01 (TCP_ESTABLISHED).
+    check_socket_inodes_established("/proc/net/tcp", &socket_inodes)
+        || check_socket_inodes_established("/proc/net/tcp6", &socket_inodes)
+        || check_socket_inodes_established("/proc/net/udp", &socket_inodes)
+        || check_socket_inodes_established("/proc/net/udp6", &socket_inodes)
+}
+
+fn check_socket_inodes_established(path: &str, inodes: &[u64]) -> bool {
+    if let Ok(content) = fs::read_to_string(path) {
+        for line in content.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            // In /proc/net/{tcp,tcp6,udp,udp6}:
+            // field 4 (index 3) is connection state: 01 = TCP_ESTABLISHED
+            // field 10 (index 9) is the socket inode
+            if fields.len() > 9 && fields[3] == "01" {
+                if let Ok(entry_inode) = fields[9].parse::<u64>() {
+                    if inodes.contains(&entry_inode) {
+                        return true;
+                    }
                 }
             }
         }

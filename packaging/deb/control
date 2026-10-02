@@ -4,6 +4,7 @@ Section: utils
 Priority: optional
 Architecture: any
 Maintainer: Agent-Radar Contributors <team@agent-radar.dev>
+Homepage: https://github.com/agent-radar/agent-radar
 Description: Ultra-lightweight terminal HUD for AI coding agents
  Agent-Radar is an ultra-lightweight, zero-privilege workspace activity HUD
  designed to monitor, categorize, and visually stream AI CLI agent behavior

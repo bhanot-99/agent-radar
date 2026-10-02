@@ -1,10 +1,12 @@
+%global repo %{?agent_radar_repo}%{!?agent_radar_repo:agent-radar/agent-radar}
+
 Name:           agent-radar
 Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Ultra-lightweight terminal HUD for AI coding agents
 License:        MIT
-URL:            https://github.com/agent-radar/agent-radar
-Source0:        %{name}-%{version}.tar.gz
+URL:            https://github.com/%{repo}
+Source0:        https://github.com/%{repo}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:  cargo
 BuildRequires:  rust >= 1.75
