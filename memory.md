@@ -97,12 +97,50 @@
   - **Minor / Clippy**: Fixed all 15 clippy warnings; `cargo clippy --all-targets` runs with 0 warnings.
   - **Test Suite**: Expanded test suite to 31 unit and integration tests, covering Unicode truncation, unpaired moves, runtime ancestry walk, footer telemetry, hero persistence, per-path locking, active TCP socket PID scoping, and sparse/metadata progress calculation. All 31 tests pass green.
 
+- **2026-10-03** — 26-Category Taxonomy & Generic Hero-Card Animation Expansion (`docs/superpowers/specs/2026-10-03-category-expansion-design.md`):
+  - **Category Taxonomy (26 + SystemIdle)**: Fully expanded `ActivityCategory` across 6 groups:
+    - Group A (Code & Docs, preserving per-language line diffing): `RustEdit`, `PythonEdit`, `WebEdit`, `StyleEdit`, `MarkupEdit`, `ConfigEdit`, `DocsEdit`, `ShellScriptEdit`.
+    - Group B (Data & Media): `ImageAsset`, `AudioAsset`, `VideoAsset`, `FontAsset`, `NotebookActivity`.
+    - Group C (AI/ML): `ModelTrainingCheckpoint`, `ModelConfigEdit`.
+    - Group D (Network / Transfer): `IncomingDataStream`, `ArchiveWrite`.
+    - Group E (Process & Action): `GitOperation`, `DependencyLockUpdate`, `TestFileActivity`, `EnvSecretChange`, `CiPipelineEdit`, `ContainerConfigEdit`.
+    - Group F (Structural): `WorkspaceExpansion`, `MassDeletion`, `FileMutation`.
+    - System State: `SystemIdle`.
+  - **Strict Compiler-Enforced Exhaustiveness**: Every `match` over `ActivityCategory` in `theme.rs`, `log_feed_table.rs`, `hero_stream.rs`, and `classifier/mod.rs` is exhaustive with zero wildcard `_` fallback arms.
+  - **Single Source of Truth (`theme.rs`)**: Implemented `CategoryVisual` mapping each category to its 2 animation-safe Unicode glyphs, funny all-caps caption, TrueColor hex, log label, and animation primitive.
+  - **5 Cyberpunk Animation Primitives (`hero_stream.rs`)**:
+    - `PulseDot`: category-parameterized alternating pulse dot.
+    - `FlowArrow`: directional traveling marker stream gauge.
+    - `BounceBar`: multi-state bouncing gauge (`glyph_b` / `▒` / `glyph_a`).
+    - `Spinner`: 4-frame rotation cycling on `['◐','◓','◑','◒']`.
+    - `Wave`: phase-shifted column wave cycling `▁▂▃▄▅▆▇█▇▆▅▄▃▂▁`.
+  - **Rule Engine Priority Order (§5.1)**:
+    1. Directory create -> `WorkspaceExpansion`
+    2. Exact matches (`.env`, `Dockerfile`, lockfiles, CI workflows)
+    3. Test pattern (`test_*`, `*_test.*`, `*.spec.*`, `tests/` path)
+    4. Git attribution (`is_git_process: true`)
+    5. Checkpoint weights (`.pt`, `.safetensors`, `.ckpt`, `.onnx`)
+    6. `.bin` disambiguation
+    7. Model config (`.json`/`.yaml` in model context)
+    8. Dataset/archive (`active_network_stream` -> `IncomingDataStream`, else `ArchiveWrite`)
+    9. Media extensions
+    10. Per-language code edits with debounced line-diffing
+    11. `FileMutation` catch-all
+  - **MassDeletion Burst Coalescing (§5.2)**: Buffers deletions into `delete_burst` during 300ms window; emits single `MassDeletion` event if count >= 5, or individual deletions if < 5.
+  - **Generic HeroCardType**: Consolidated `HeroCardType` into `Active { category, started_at, last_updated, frame }` and `IdleCard`, animating all 26 active categories while preserving frame/started_at on continuous updates.
+  - **Raw Mode Keyboard Handling**: Added `TAG_STDIN` to epoll reactor to handle Ctrl-C (0x03) and 'q' keypresses directly in raw mode for instantaneous clean terminal exit.
+  - **Empirical SLA Verification on Release Binary**:
+    - Idle CPU: 0.0% (0 ticks over sleep window while blocked on `epoll_wait(-1)`).
+    - RSS: 4.65 MB (well under <10 MB baseline and <8 MB stretch target).
+    - Open FDs: 9 (enforced strictly <= 10 cap).
+  - **Test Suite**: 38 tests passing green (14 classifier tests, 8 correlator tests, 7 TUI tests, 5 watcher tests, 4 lib unit tests). Clippy runs with 0 warnings.
+
 ---
 
 ## 2. Currently Working On
 
-- **Active file/task**: Fully verified all 16 deep review findings. All tests passing (31/31), 0 clippy warnings, release and musl binaries built.
-- **Next expected step**: Completed. Ready for user feedback and deployment.
+- **Active file/task**: Fully completed 26-category expansion and generic hero animation system per design spec.
+- **Next expected step**: Ready for user review and live streaming.
 
 ---
 

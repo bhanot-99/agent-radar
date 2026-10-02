@@ -21,13 +21,7 @@ use self::widgets::log_feed_table::LogFeedTableWidget;
 
 #[derive(Debug, Clone)]
 pub enum HeroCardType {
-    DataStreamCard {
-        category: crate::events::ActivityCategory,
-        started_at: Instant,
-        last_updated: Instant,
-        frame: u64,
-    },
-    ModelTrainingCard {
+    Active {
         category: crate::events::ActivityCategory,
         started_at: Instant,
         last_updated: Instant,
@@ -39,10 +33,7 @@ pub enum HeroCardType {
 impl HeroCardType {
     pub fn is_animating(&self) -> bool {
         match self {
-            HeroCardType::ModelTrainingCard { last_updated, .. } => {
-                last_updated.elapsed() < Duration::from_secs(10)
-            }
-            HeroCardType::DataStreamCard { last_updated, .. } => {
+            HeroCardType::Active { last_updated, .. } => {
                 last_updated.elapsed() < Duration::from_secs(10)
             }
             HeroCardType::IdleCard => false,
@@ -51,8 +42,7 @@ impl HeroCardType {
 
     pub fn advance_frame(&mut self) {
         match self {
-            HeroCardType::ModelTrainingCard { frame, .. } => *frame = frame.wrapping_add(1),
-            HeroCardType::DataStreamCard { frame, .. } => *frame = frame.wrapping_add(1),
+            HeroCardType::Active { frame, .. } => *frame = frame.wrapping_add(1),
             HeroCardType::IdleCard => {}
         }
     }
@@ -168,43 +158,32 @@ impl TuiState {
 
         let now = Instant::now();
 
-        // Check if event triggers a Hero Card, preserving started_at across updates
-        match &event.category {
-            crate::events::ActivityCategory::ModelTrainingCheckpoint { .. } => {
-                if let Some(HeroCardType::ModelTrainingCard {
-                    ref mut category,
-                    ref mut last_updated,
-                    ..
-                }) = self.active_hero {
+        // Check if event triggers a Hero Card, preserving started_at across updates of the same category
+        if event.category != crate::events::ActivityCategory::SystemIdle {
+            if let Some(HeroCardType::Active {
+                ref mut category,
+                ref mut last_updated,
+                ..
+            }) = self.active_hero {
+                if std::mem::discriminant(category) == std::mem::discriminant(&event.category) {
                     *category = event.category.clone();
                     *last_updated = now;
                 } else {
-                    self.active_hero = Some(HeroCardType::ModelTrainingCard {
+                    self.active_hero = Some(HeroCardType::Active {
                         category: event.category.clone(),
                         started_at: now,
                         last_updated: now,
                         frame: 0,
                     });
                 }
+            } else {
+                self.active_hero = Some(HeroCardType::Active {
+                    category: event.category.clone(),
+                    started_at: now,
+                    last_updated: now,
+                    frame: 0,
+                });
             }
-            crate::events::ActivityCategory::IncomingDataStream { .. } => {
-                if let Some(HeroCardType::DataStreamCard {
-                    ref mut category,
-                    ref mut last_updated,
-                    ..
-                }) = self.active_hero {
-                    *category = event.category.clone();
-                    *last_updated = now;
-                } else {
-                    self.active_hero = Some(HeroCardType::DataStreamCard {
-                        category: event.category.clone(),
-                        started_at: now,
-                        last_updated: now,
-                        frame: 0,
-                    });
-                }
-            }
-            _ => {}
         }
 
         self.events.push_front(event);
@@ -328,7 +307,7 @@ pub fn render_hud(f: &mut Frame, state: &TuiState) {
 fn render_footer(f: &mut Frame, area: Rect, state: &TuiState) {
     let rss_mb = state.system_metrics.rss_bytes as f64 / (1024.0 * 1024.0);
     let footer_text = format!(
-        " AGENT-RADAR v0.1.0  |  RSS: {:.2} MB  |  CPU: ~{:.1}%  |  PIDS: {}  |  REDRAWS: {}  |  [Ctrl-C / SIGTERM to Exit]",
+        " AGENT-RADAR v0.1.0  |  RSS: {:.2} MB  |  CPU: ~{:.1}%  |  PIDS: {}  |  REDRAWS: {}  |  [q / Ctrl-C to Exit]",
         rss_mb, state.system_metrics.cpu_pct, state.system_metrics.tracked_pids, state.fps_counter.frame_count
     );
 

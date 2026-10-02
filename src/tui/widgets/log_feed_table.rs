@@ -88,23 +88,50 @@ impl<'a> Widget for LogFeedTableWidget<'a> {
 
 fn format_details(category: &ActivityCategory) -> String {
     match category {
-        ActivityCategory::SourceCodeMutation { path, lines_added, lines_removed } => {
+        ActivityCategory::RustEdit { path, lines_added, lines_removed }
+        | ActivityCategory::PythonEdit { path, lines_added, lines_removed }
+        | ActivityCategory::WebEdit { path, lines_added, lines_removed }
+        | ActivityCategory::StyleEdit { path, lines_added, lines_removed }
+        | ActivityCategory::MarkupEdit { path, lines_added, lines_removed }
+        | ActivityCategory::ConfigEdit { path, lines_added, lines_removed }
+        | ActivityCategory::DocsEdit { path, lines_added, lines_removed }
+        | ActivityCategory::ShellScriptEdit { path, lines_added, lines_removed } => {
             if *lines_added > 0 || *lines_removed > 0 {
                 format!("{} (+{} / -{})", path, lines_added, lines_removed)
             } else {
                 path.clone()
             }
         }
+        ActivityCategory::ImageAsset { path }
+        | ActivityCategory::AudioAsset { path }
+        | ActivityCategory::VideoAsset { path }
+        | ActivityCategory::FontAsset { path }
+        | ActivityCategory::NotebookActivity { path }
+        | ActivityCategory::ModelConfigEdit { path }
+        | ActivityCategory::ArchiveWrite { path }
+        | ActivityCategory::GitOperation { path }
+        | ActivityCategory::DependencyLockUpdate { path }
+        | ActivityCategory::TestFileActivity { path }
+        | ActivityCategory::EnvSecretChange { path }
+        | ActivityCategory::CiPipelineEdit { path }
+        | ActivityCategory::ContainerConfigEdit { path } => path.clone(),
         ActivityCategory::ModelTrainingCheckpoint { path, size_bytes } => {
             let size_mb = *size_bytes as f64 / (1024.0 * 1024.0);
             format!("{} ({:.2} MB)", path, size_mb)
         }
-        ActivityCategory::IncomingDataStream { path, bytes_per_sec, .. } => {
+        ActivityCategory::IncomingDataStream { path, bytes_per_sec, progress_pct } => {
             let kb_sec = *bytes_per_sec as f64 / 1024.0;
-            format!("{} ({:.1} KB/s)", path, kb_sec)
+            if let Some(pct) = progress_pct {
+                format!("{} ({:.1} KB/s, {}%)", path, kb_sec, pct)
+            } else {
+                format!("{} ({:.1} KB/s)", path, kb_sec)
+            }
         }
         ActivityCategory::WorkspaceExpansion { path } => {
             format!("new directory: {}", path)
+        }
+        ActivityCategory::MassDeletion { count, sample_paths } => {
+            format!("deleted {} files ({})", count, sample_paths.join(", "))
         }
         ActivityCategory::FileMutation { path, op } => {
             let op_str = match op {

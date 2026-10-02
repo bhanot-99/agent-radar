@@ -31,6 +31,10 @@ impl Drop for TempDir {
 }
 
 fn make_dummy_event(path: PathBuf, mask: EventMask, cookie: u32, network: bool) -> EnrichedEvent {
+    make_dummy_event_with_git(path, mask, cookie, network, false)
+}
+
+fn make_dummy_event_with_git(path: PathBuf, mask: EventMask, cookie: u32, network: bool, is_git: bool) -> EnrichedEvent {
     let dir = path.parent().unwrap_or(Path::new("/tmp")).to_path_buf();
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
     let inotify = inotify::Inotify::init().unwrap();
@@ -48,11 +52,12 @@ fn make_dummy_event(path: PathBuf, mask: EventMask, cookie: u32, network: bool) 
         timestamp: SystemTime::now(),
         pid: Some(1234),
         ppid: Some(100),
-        process_name: "claude-code".to_string(),
-        is_ai_agent: true,
-        agent_ancestor: Some("claude-code".to_string()),
+        process_name: if is_git { "git".to_string() } else { "claude-code".to_string() },
+        is_ai_agent: !is_git,
+        agent_ancestor: if is_git { None } else { Some("claude-code".to_string()) },
         active_network_stream: network,
         local_disk_mutation: !network,
+        is_git_process: is_git,
     }
 }
 
@@ -65,7 +70,7 @@ fn test_checkpoint_detection() {
         f.write_all(&vec![0u8; 1024 * 1024]).unwrap(); // 1MB
     }
 
-    let verdict = evaluate_rules(&model_path, false, FileOp::Modified, false);
+    let verdict = evaluate_rules(&model_path, false, FileOp::Modified, false, false);
     match verdict {
         RuleVerdict::ModelTrainingCheckpoint { size_bytes } => {
             assert_eq!(size_bytes, 1024 * 1024);
@@ -85,7 +90,7 @@ fn test_bin_disambiguation_with_context() {
     fs::write(&shard_bin, b"weights data").unwrap();
 
     assert!(is_checkpoint_path_context(&shard_bin));
-    let verdict1 = evaluate_rules(&shard_bin, false, FileOp::Modified, false);
+    let verdict1 = evaluate_rules(&shard_bin, false, FileOp::Modified, false, false);
     assert!(matches!(verdict1, RuleVerdict::ModelTrainingCheckpoint { .. }));
 
     // Case 2: In a directory with sibling *.index.json
@@ -96,7 +101,7 @@ fn test_bin_disambiguation_with_context() {
     fs::write(&sibling_bin, b"tensor data").unwrap();
 
     assert!(is_checkpoint_path_context(&sibling_bin));
-    let verdict2 = evaluate_rules(&sibling_bin, false, FileOp::Modified, false);
+    let verdict2 = evaluate_rules(&sibling_bin, false, FileOp::Modified, false, false);
     assert!(matches!(verdict2, RuleVerdict::ModelTrainingCheckpoint { .. }));
 
     // Case 3: Plain .bin without checkpoint context, with active_network_stream
@@ -106,11 +111,11 @@ fn test_bin_disambiguation_with_context() {
     fs::write(&plain_bin, b"firmware").unwrap();
 
     assert!(!is_checkpoint_path_context(&plain_bin));
-    let verdict3 = evaluate_rules(&plain_bin, false, FileOp::Modified, true);
+    let verdict3 = evaluate_rules(&plain_bin, false, FileOp::Modified, true, false);
     assert_eq!(verdict3, RuleVerdict::IncomingDataStream);
 
     // Case 4: Plain .bin without network stream -> FileMutation
-    let verdict4 = evaluate_rules(&plain_bin, false, FileOp::Modified, false);
+    let verdict4 = evaluate_rules(&plain_bin, false, FileOp::Modified, false, false);
     assert_eq!(verdict4, RuleVerdict::FileMutation(FileOp::Modified));
 }
 
@@ -120,23 +125,24 @@ fn test_dataset_stream_vs_local_mutation() {
     let parquet_path = temp.path.join("dataset.parquet");
     fs::write(&parquet_path, b"parquet data").unwrap();
 
-    let stream_verdict = evaluate_rules(&parquet_path, false, FileOp::Modified, true);
+    let stream_verdict = evaluate_rules(&parquet_path, false, FileOp::Modified, true, false);
     assert_eq!(stream_verdict, RuleVerdict::IncomingDataStream);
 
-    let local_verdict = evaluate_rules(&parquet_path, false, FileOp::Modified, false);
-    assert_eq!(local_verdict, RuleVerdict::FileMutation(FileOp::Modified));
+    // Without active network stream, archive/dataset formats classify as ArchiveWrite
+    let local_verdict = evaluate_rules(&parquet_path, false, FileOp::Modified, false, false);
+    assert_eq!(local_verdict, RuleVerdict::ArchiveWrite);
 }
 
 #[test]
 fn test_workspace_expansion() {
     let temp = TempDir::new("workspace");
     let new_dir = temp.path.join("new_feature");
-    let verdict = evaluate_rules(&new_dir, true, FileOp::Created, false);
+    let verdict = evaluate_rules(&new_dir, true, FileOp::Created, false, false);
     assert_eq!(verdict, RuleVerdict::WorkspaceExpansion);
 }
 
 #[test]
-fn test_source_code_mutation_and_line_diff() {
+fn test_rust_edit_and_line_diff() {
     let temp = TempDir::new("source");
     let code_file = temp.path.join("main.rs");
     let mut classifier = SemanticClassifier::new();
@@ -147,11 +153,11 @@ fn test_source_code_mutation_and_line_diff() {
     let te1 = classifier.classify_direct(&ev1, &code_file, false, FileOp::Created);
 
     match te1.category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed, .. } => {
             assert_eq!(lines_added, 5);
             assert_eq!(lines_removed, 0);
         }
-        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+        other => panic!("Expected RustEdit, got {:?}", other),
     }
 
     // 2. Add 3 more lines (8 total)
@@ -160,11 +166,11 @@ fn test_source_code_mutation_and_line_diff() {
     let te2 = classifier.classify_direct(&ev2, &code_file, false, FileOp::Modified);
 
     match te2.category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed, .. } => {
             assert_eq!(lines_added, 3);
             assert_eq!(lines_removed, 0);
         }
-        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+        other => panic!("Expected RustEdit, got {:?}", other),
     }
 
     // 3. Remove lines (shrink to 2 lines)
@@ -173,19 +179,19 @@ fn test_source_code_mutation_and_line_diff() {
     let te3 = classifier.classify_direct(&ev3, &code_file, false, FileOp::Modified);
 
     match te3.category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed, .. } => {
             assert_eq!(lines_added, 0);
             assert_eq!(lines_removed, 6);
         }
-        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+        other => panic!("Expected RustEdit, got {:?}", other),
     }
 }
 
 #[test]
 fn test_rename_cookie_pairing() {
     let temp = TempDir::new("ren_pair");
-    let from_file = temp.path.join("old.txt");
-    let to_file = temp.path.join("new.txt");
+    let from_file = temp.path.join("old.dat");
+    let to_file = temp.path.join("new.dat");
     fs::write(&to_file, "atomic save content").unwrap();
 
     let mut classifier = SemanticClassifier::new();
@@ -218,7 +224,7 @@ fn test_debounce_coalescing() {
     thread::sleep(Duration::from_millis(50));
     let flushed = classifier.flush_ready(Duration::from_millis(40));
     assert_eq!(flushed.len(), 1, "Expected 1 flushed event");
-    assert!(matches!(flushed[0].category, ActivityCategory::SourceCodeMutation { .. }));
+    assert!(matches!(flushed[0].category, ActivityCategory::RustEdit { .. }));
 }
 
 #[test]
@@ -239,7 +245,7 @@ fn test_unpaired_moved_from_emits_deletion() {
     let flushed = classifier.flush_ready(Duration::from_millis(100));
     assert_eq!(flushed.len(), 1, "Unpaired MOVED_FROM must emit a deletion event");
     match &flushed[0].category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed: _, path } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed: _, path } => {
             assert_eq!(*lines_added, 0);
             assert_eq!(path, &from_file.to_string_lossy().into_owned());
         }
@@ -267,11 +273,11 @@ fn test_rename_preserves_line_count_no_false_added_lines() {
     let ev_init = make_dummy_event(from_file.clone(), EventMask::CLOSE_WRITE, 0, false);
     let te_init = classifier.classify_direct(&ev_init, &from_file, false, FileOp::Created);
     match te_init.category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed, .. } => {
             assert_eq!(lines_added, 50);
             assert_eq!(lines_removed, 0);
         }
-        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+        other => panic!("Expected RustEdit, got {:?}", other),
     }
 
     // 2. Rename original.rs to renamed.rs (same 50 lines)
@@ -285,11 +291,11 @@ fn test_rename_preserves_line_count_no_false_added_lines() {
 
     // 3. Renamed file has IDENTICAL lines -> must report 0 added, 0 removed! (Finding 9)
     match te_renamed.category {
-        ActivityCategory::SourceCodeMutation { lines_added, lines_removed, .. } => {
+        ActivityCategory::RustEdit { lines_added, lines_removed, .. } => {
             assert_eq!(lines_added, 0, "Pure rename should not report added lines");
             assert_eq!(lines_removed, 0, "Pure rename should not report removed lines");
         }
-        other => panic!("Expected SourceCodeMutation, got {:?}", other),
+        other => panic!("Expected RustEdit, got {:?}", other),
     }
 }
 
@@ -333,7 +339,7 @@ fn test_incoming_data_stream_progress_percentage() {
 
 #[test]
 fn test_incoming_data_stream_sparse_preallocation_progress() {
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::{Seek, SeekFrom};
     let temp = TempDir::new("stream_sparse");
     let file_path = temp.path.join("sparse_download.parquet");
 
@@ -357,5 +363,209 @@ fn test_incoming_data_stream_sparse_preallocation_progress() {
             assert!((9..=11).contains(&pct), "Expected progress around 10%, got {}%", pct);
         }
         other => panic!("Expected IncomingDataStream, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_rule_priority_order() {
+    // 1. Directory creation beats everything
+    let dir = Path::new("tests/my_dir");
+    assert_eq!(
+        evaluate_rules(dir, true, FileOp::Created, false, false),
+        RuleVerdict::WorkspaceExpansion
+    );
+
+    // 2. Exact match: EnvSecretChange
+    assert_eq!(
+        evaluate_rules(Path::new(".env"), false, FileOp::Modified, false, false),
+        RuleVerdict::EnvSecretChange
+    );
+    assert_eq!(
+        evaluate_rules(Path::new(".env.production"), false, FileOp::Modified, false, false),
+        RuleVerdict::EnvSecretChange
+    );
+
+    // 2. Exact match: ContainerConfigEdit
+    assert_eq!(
+        evaluate_rules(Path::new("Dockerfile"), false, FileOp::Modified, false, false),
+        RuleVerdict::ContainerConfigEdit
+    );
+    assert_eq!(
+        evaluate_rules(Path::new("Dockerfile.prod"), false, FileOp::Modified, false, false),
+        RuleVerdict::ContainerConfigEdit
+    );
+    assert_eq!(
+        evaluate_rules(Path::new("docker-compose.yml"), false, FileOp::Modified, false, false),
+        RuleVerdict::ContainerConfigEdit
+    );
+
+    // 2. Exact match: DependencyLockUpdate
+    assert_eq!(
+        evaluate_rules(Path::new("Cargo.lock"), false, FileOp::Modified, false, false),
+        RuleVerdict::DependencyLockUpdate
+    );
+    assert_eq!(
+        evaluate_rules(Path::new("package-lock.json"), false, FileOp::Modified, false, false),
+        RuleVerdict::DependencyLockUpdate
+    );
+
+    // 2. Exact match: CiPipelineEdit
+    assert_eq!(
+        evaluate_rules(Path::new(".gitlab-ci.yml"), false, FileOp::Modified, false, false),
+        RuleVerdict::CiPipelineEdit
+    );
+    assert_eq!(
+        evaluate_rules(Path::new(".github/workflows/deploy.yml"), false, FileOp::Modified, false, false),
+        RuleVerdict::CiPipelineEdit
+    );
+
+    // 3. Test pattern beats per-language code edit
+    assert_eq!(
+        evaluate_rules(Path::new("tests/test_service.py"), false, FileOp::Modified, false, false),
+        RuleVerdict::TestFileActivity,
+        "tests/test_service.py must evaluate to TestFileActivity, not PythonEdit"
+    );
+    assert_eq!(
+        evaluate_rules(Path::new("src/auth_test.rs"), false, FileOp::Modified, false, false),
+        RuleVerdict::TestFileActivity,
+        "src/auth_test.rs must evaluate to TestFileActivity, not RustEdit"
+    );
+    assert_eq!(
+        evaluate_rules(Path::new("client/app.spec.ts"), false, FileOp::Modified, false, false),
+        RuleVerdict::TestFileActivity,
+        "client/app.spec.ts must evaluate to TestFileActivity, not WebEdit"
+    );
+
+    // 4. Git process attribution beats code edit
+    assert_eq!(
+        evaluate_rules(Path::new("src/main.rs"), false, FileOp::Modified, false, true),
+        RuleVerdict::GitOperation,
+        "Git-attributed write to main.rs must evaluate to GitOperation, not RustEdit"
+    );
+
+    // 7. ModelConfigEdit beats generic ConfigEdit
+    let temp = TempDir::new("model_cfg");
+    let model_dir = temp.path.join("weights");
+    fs::create_dir(&model_dir).unwrap();
+    let cfg_json = model_dir.join("config.json");
+    fs::write(&cfg_json, b"{}").unwrap();
+    assert_eq!(
+        evaluate_rules(&cfg_json, false, FileOp::Modified, false, false),
+        RuleVerdict::ModelConfigEdit,
+        "config.json in model directory must evaluate to ModelConfigEdit, not ConfigEdit"
+    );
+}
+
+#[test]
+fn test_extension_coverage_group_a_b_c_d() {
+    let cases = [
+        // Group A — Code & Docs
+        ("src/lib.rs", RuleVerdict::RustEdit),
+        ("app/main.py", RuleVerdict::PythonEdit),
+        ("ui/index.ts", RuleVerdict::WebEdit),
+        ("ui/app.tsx", RuleVerdict::WebEdit),
+        ("ui/bundle.js", RuleVerdict::WebEdit),
+        ("ui/component.jsx", RuleVerdict::WebEdit),
+        ("assets/main.css", RuleVerdict::StyleEdit),
+        ("assets/style.scss", RuleVerdict::StyleEdit),
+        ("assets/theme.less", RuleVerdict::StyleEdit),
+        ("public/index.html", RuleVerdict::MarkupEdit),
+        ("scripts/run.sh", RuleVerdict::ShellScriptEdit),
+        ("scripts/deploy.bash", RuleVerdict::ShellScriptEdit),
+        ("scripts/env.zsh", RuleVerdict::ShellScriptEdit),
+        ("README.md", RuleVerdict::DocsEdit),
+        ("docs/index.rst", RuleVerdict::DocsEdit),
+        ("notes.txt", RuleVerdict::DocsEdit),
+        ("settings.toml", RuleVerdict::ConfigEdit),
+        ("config.yaml", RuleVerdict::ConfigEdit),
+        ("config.yml", RuleVerdict::ConfigEdit),
+        ("data.json", RuleVerdict::ConfigEdit),
+
+        // Group B — Media
+        ("logo.png", RuleVerdict::ImageAsset),
+        ("photo.jpg", RuleVerdict::ImageAsset),
+        ("avatar.jpeg", RuleVerdict::ImageAsset),
+        ("banner.gif", RuleVerdict::ImageAsset),
+        ("icon.svg", RuleVerdict::ImageAsset),
+        ("bg.webp", RuleVerdict::ImageAsset),
+        ("track.mp3", RuleVerdict::AudioAsset),
+        ("sound.wav", RuleVerdict::AudioAsset),
+        ("audio.flac", RuleVerdict::AudioAsset),
+        ("movie.mp4", RuleVerdict::VideoAsset),
+        ("clip.mov", RuleVerdict::VideoAsset),
+        ("stream.webm", RuleVerdict::VideoAsset),
+        ("font.ttf", RuleVerdict::FontAsset),
+        ("font.otf", RuleVerdict::FontAsset),
+        ("font.woff", RuleVerdict::FontAsset),
+        ("font.woff2", RuleVerdict::FontAsset),
+        ("analysis.ipynb", RuleVerdict::NotebookActivity),
+
+        // Group C — Checkpoints
+        ("checkpoint.pt", RuleVerdict::ModelTrainingCheckpoint { size_bytes: 0 }),
+        ("model.safetensors", RuleVerdict::ModelTrainingCheckpoint { size_bytes: 0 }),
+        ("weights.ckpt", RuleVerdict::ModelTrainingCheckpoint { size_bytes: 0 }),
+        ("net.onnx", RuleVerdict::ModelTrainingCheckpoint { size_bytes: 0 }),
+
+        // Group D — Archive
+        ("bundle.zip", RuleVerdict::ArchiveWrite),
+        ("archive.tar.gz", RuleVerdict::ArchiveWrite),
+        ("backup.tgz", RuleVerdict::ArchiveWrite),
+        ("files.tar", RuleVerdict::ArchiveWrite),
+        ("records.arrow", RuleVerdict::ArchiveWrite),
+        ("table.csv", RuleVerdict::ArchiveWrite),
+        ("lines.jsonl", RuleVerdict::ArchiveWrite),
+    ];
+
+    for (path_str, expected) in cases {
+        let p = Path::new(path_str);
+        let verdict = evaluate_rules(p, false, FileOp::Modified, false, false);
+        assert_eq!(
+            verdict, expected,
+            "Failed extension test for {}: expected {:?}, got {:?}",
+            path_str, expected, verdict
+        );
+    }
+}
+
+#[test]
+fn test_mass_deletion_burst_behavior() {
+    let mut classifier = SemanticClassifier::new();
+
+    // 1. Send 4 deletes (< 5) within the 300ms window
+    for i in 1..=4 {
+        let p = PathBuf::from(format!("/tmp/file_{}.rs", i));
+        let ev = make_dummy_event(p, EventMask::DELETE, 0, false);
+        let emitted = classifier.push_event(ev);
+        assert!(emitted.is_none(), "Deletes should be buffered in delete_burst");
+    }
+
+    // Flush after 300ms window expires
+    thread::sleep(Duration::from_millis(320));
+    let flushed = classifier.flush_ready(Duration::from_millis(300));
+
+    // Under 5 deletions -> each emitted individually
+    assert_eq!(flushed.len(), 4, "4 deletes must be emitted individually");
+    for event in flushed {
+        assert!(matches!(event.category, ActivityCategory::RustEdit { .. }));
+    }
+
+    // 2. Send 5 deletes (>= 5) within the 300ms window -> exactly 1 MassDeletion event
+    for i in 1..=5 {
+        let p = PathBuf::from(format!("/tmp/mass_delete_{}.rs", i));
+        let ev = make_dummy_event(p, EventMask::DELETE, 0, false);
+        let emitted = classifier.push_event(ev);
+        assert!(emitted.is_none(), "Deletes should be buffered in delete_burst");
+    }
+
+    thread::sleep(Duration::from_millis(320));
+    let flushed_burst = classifier.flush_ready(Duration::from_millis(300));
+
+    assert_eq!(flushed_burst.len(), 1, "5 deletes must coalesce into 1 MassDeletion event");
+    match &flushed_burst[0].category {
+        ActivityCategory::MassDeletion { count, sample_paths } => {
+            assert_eq!(*count, 5);
+            assert_eq!(sample_paths.len(), 3);
+        }
+        other => panic!("Expected MassDeletion, got {:?}", other),
     }
 }

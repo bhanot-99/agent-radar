@@ -116,3 +116,35 @@ fn test_correlator_tracked_pid_count() {
     correlator.get_or_resolve(my_pid);
     assert_eq!(correlator.tracked_pid_count(), 1, "Tracked PID count must increment on resolution");
 }
+
+#[test]
+fn test_is_git_process_attribution() {
+    let mut correlator = ProcessCorrelator::new();
+
+    // Default background-io must have is_git_process: false
+    let inotify = inotify::Inotify::init().unwrap();
+    let wd = inotify.watches().add("/tmp", inotify::WatchMask::MODIFY).unwrap();
+    let raw = agent_radar::watcher::inotify_tier::RawFsEvent {
+        wd,
+        mask: EventMask::MODIFY,
+        cookie: 0,
+        name: Some("README.md".to_string()),
+        dir_path: PathBuf::from("/tmp"),
+        full_path: Some(PathBuf::from("/tmp/README.md")),
+    };
+    let enriched = correlator.correlate(raw);
+    assert!(!enriched.is_git_process, "Background I/O must not be git");
+
+    // Process named git
+    if let Ok(mut child) = std::process::Command::new("git")
+        .arg("version")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+    {
+        let child_pid = child.id();
+        if let Some(info) = correlator.get_or_resolve(child_pid) {
+            assert_eq!(info.name, "git");
+        }
+        let _ = child.wait();
+    }
+}

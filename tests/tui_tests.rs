@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant, SystemTime};
 use agent_radar::events::{ActivityCategory, TelemetryEvent};
+use agent_radar::tui::theme::{category_visual, AnimationPrimitive};
 use agent_radar::tui::{HeroCardType, TuiState};
 
 #[test]
@@ -21,20 +22,20 @@ fn test_hero_card_animation_lifecycle() {
     state.push_event(event);
 
     assert!(state.is_animating(), "Hero card should be animating after checkpoint event");
-    assert!(matches!(state.active_hero, Some(HeroCardType::ModelTrainingCard { .. })));
+    assert!(matches!(state.active_hero, Some(HeroCardType::Active { .. })));
 
     // Tick animation
     let changed = state.tick_animation();
     assert!(changed, "tick_animation should return true while animating");
 
-    if let Some(HeroCardType::ModelTrainingCard { frame, .. }) = state.active_hero {
+    if let Some(HeroCardType::Active { frame, .. }) = state.active_hero {
         assert_eq!(frame, 1);
     } else {
-        panic!("Expected ModelTrainingCard");
+        panic!("Expected Active HeroCard");
     }
 
     // Simulate elapsed time (> 10s)
-    if let Some(HeroCardType::ModelTrainingCard { ref mut last_updated, .. }) = state.active_hero {
+    if let Some(HeroCardType::Active { ref mut last_updated, .. }) = state.active_hero {
         *last_updated = Instant::now() - Duration::from_secs(15);
     }
 
@@ -65,7 +66,7 @@ fn test_datastream_hero_card() {
     state.push_event(event);
 
     assert!(state.is_animating());
-    assert!(matches!(state.active_hero, Some(HeroCardType::DataStreamCard { .. })));
+    assert!(matches!(state.active_hero, Some(HeroCardType::Active { .. })));
 }
 
 #[test]
@@ -85,8 +86,8 @@ fn test_hero_card_persists_started_at_across_updates() {
     state.push_event(event1);
 
     let started_at_first = match state.active_hero {
-        Some(HeroCardType::ModelTrainingCard { started_at, .. }) => started_at,
-        _ => panic!("Expected ModelTrainingCard"),
+        Some(HeroCardType::Active { started_at, .. }) => started_at,
+        _ => panic!("Expected Active HeroCard"),
     };
 
     std::thread::sleep(Duration::from_millis(50));
@@ -105,8 +106,8 @@ fn test_hero_card_persists_started_at_across_updates() {
     state.push_event(event2);
 
     let started_at_second = match state.active_hero {
-        Some(HeroCardType::ModelTrainingCard { started_at, .. }) => started_at,
-        _ => panic!("Expected ModelTrainingCard"),
+        Some(HeroCardType::Active { started_at, .. }) => started_at,
+        _ => panic!("Expected Active HeroCard"),
     };
 
     // started_at must persist and NOT reset to now! (Finding 10)
@@ -133,7 +134,7 @@ fn test_system_idle_event_generation() {
         },
     });
 
-    if let Some(HeroCardType::ModelTrainingCard { ref mut last_updated, .. }) = state.active_hero {
+    if let Some(HeroCardType::Active { ref mut last_updated, .. }) = state.active_hero {
         *last_updated = Instant::now() - Duration::from_secs(15);
     }
 
@@ -163,8 +164,6 @@ fn test_unicode_safe_hud_rendering() {
     use ratatui::Terminal;
     use agent_radar::tui::render_hud;
 
-    let _backend = TestBackend::new(80, 24);
-
     let mut state = TuiState::new("/tmp/日本語/プロジェクト/🚀", false);
 
     // Add events with complex Unicode (CJK, emojis, accents)
@@ -173,7 +172,7 @@ fn test_unicode_safe_hud_rendering() {
         pid: 1001,
         ppid: 1,
         process_name: "claude-code (日本語)".to_string(),
-        category: ActivityCategory::SourceCodeMutation {
+        category: ActivityCategory::RustEdit {
             path: "src/日本語/メイン_🔥_café.rs".to_string(),
             lines_added: 12,
             lines_removed: 4,
@@ -196,5 +195,81 @@ fn test_unicode_safe_hud_rendering() {
         let backend = TestBackend::new(width, 24);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render_hud(f, &state)).expect("Rendering Unicode HUD must never panic");
+    }
+}
+
+#[test]
+fn test_all_five_animation_primitives() {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use agent_radar::tui::render_hud;
+
+    let sample_categories = [
+        (
+            ActivityCategory::ConfigEdit {
+                path: "config.toml".to_string(),
+                lines_added: 2,
+                lines_removed: 0,
+            },
+            AnimationPrimitive::PulseDot,
+        ),
+        (
+            ActivityCategory::IncomingDataStream {
+                path: "dataset.parquet".to_string(),
+                bytes_per_sec: 1024 * 1024,
+                progress_pct: Some(50),
+            },
+            AnimationPrimitive::FlowArrow,
+        ),
+        (
+            ActivityCategory::TestFileActivity {
+                path: "tests/test_auth.rs".to_string(),
+            },
+            AnimationPrimitive::BounceBar,
+        ),
+        (
+            ActivityCategory::WebEdit {
+                path: "app.tsx".to_string(),
+                lines_added: 10,
+                lines_removed: 2,
+            },
+            AnimationPrimitive::Spinner,
+        ),
+        (
+            ActivityCategory::RustEdit {
+                path: "src/main.rs".to_string(),
+                lines_added: 5,
+                lines_removed: 1,
+            },
+            AnimationPrimitive::Wave,
+        ),
+    ];
+
+    for (cat, expected_primitive) in sample_categories {
+        let visual = category_visual(&cat);
+        assert_eq!(
+            visual.primitive, expected_primitive,
+            "Category visual mismatch for {:?}",
+            cat
+        );
+
+        let mut state = TuiState::new("/tmp/test", false);
+        state.push_event(TelemetryEvent {
+            timestamp: SystemTime::now(),
+            pid: 999,
+            ppid: 1,
+            process_name: "claude".to_string(),
+            category: cat,
+        });
+
+        assert!(state.is_animating());
+
+        // Render 5 animation frames to verify no panic
+        for _ in 0..5 {
+            state.tick_animation();
+            let backend = TestBackend::new(80, 24);
+            let mut term = Terminal::new(backend).unwrap();
+            term.draw(|f| render_hud(f, &state)).expect("HUD render must succeed");
+        }
     }
 }

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "phases.md",
+                "file": "docs/superpowers/specs/2026-10-03-category-expansion-design.md",
                 "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "phases"
+              "title": "2026-10-03-category-expansion-design"
             }
           }
         ]
@@ -190,22 +190,23 @@
   },
   "active": "51d1ddc4482da136",
   "lastOpenFiles": [
-    "target/debug/incremental/classifier_tests-3g19ar6hwynns/s-hmuewwtt51-07pfgq9-9dvdhft21hnjdqf2e83d2weu5/work-products.bin",
-    "target/debug/incremental/classifier_tests-3g19ar6hwynns/s-hmuewwtt51-07pfgq9-9dvdhft21hnjdqf2e83d2weu5/query-cache.bin",
-    "target/debug/incremental/classifier_tests-3g19ar6hwynns/s-hmuewwtt51-07pfgq9-9dvdhft21hnjdqf2e83d2weu5/dep-graph.bin",
-    "target/debug/incremental/classifier_tests-3g19ar6hwynns/s-hmuewwtt51-07pfgq9-9dvdhft21hnjdqf2e83d2weu5",
-    "target/debug/incremental/watcher_tests-2ajgofyf0k7te/s-hmuewwu0vi-0kk4z8n-2xzcd7udgkhrpqr25kpe5aitn/work-products.bin",
-    "target/debug/incremental/watcher_tests-2ajgofyf0k7te/s-hmuewwu0vi-0kk4z8n-2xzcd7udgkhrpqr25kpe5aitn/query-cache.bin",
-    "target/debug/incremental/watcher_tests-2ajgofyf0k7te/s-hmuewwu0vi-0kk4z8n-2xzcd7udgkhrpqr25kpe5aitn/dep-graph.bin",
-    "target/debug/incremental/watcher_tests-2ajgofyf0k7te/s-hmuewwu0vi-0kk4z8n-2xzcd7udgkhrpqr25kpe5aitn",
-    "target/debug/incremental/tui_tests-1b4nwhbxrw4ex/s-hmuewwtzj5-050hh18-34hjhmymk8k1ik8r125jyfmmg/work-products.bin",
-    "target/debug/incremental/tui_tests-1b4nwhbxrw4ex/s-hmuewwtzj5-050hh18-34hjhmymk8k1ik8r125jyfmmg/query-cache.bin",
-    "target/debug/incremental/tui_tests-1b4nwhbxrw4ex/s-hmuewwtzj5-050hh18-34hjhmymk8k1ik8r125jyfmmg/dep-graph.bin",
+    "target/x86_64-unknown-linux-musl/release/deps/agent_radar-0b05c43506c19e11",
+    "target/x86_64-unknown-linux-musl/release/deps/rustccJHNfK/raw-dylibs",
+    "target/x86_64-unknown-linux-musl/release/deps/rustccJHNfK/symbols.o",
+    "target/x86_64-unknown-linux-musl/release/deps/rustccJHNfK",
+    "target/x86_64-unknown-linux-musl/release/deps/agent_radar-0b05c43506c19e11.939lfymt0jw2949864lkzad1k.rcgu.o",
+    "target/x86_64-unknown-linux-musl/release/deps/agent_radar-0b05c43506c19e11.agent_radar.7075b0d54afb5ac-cgu.1.rcgu.o",
+    "target/x86_64-unknown-linux-musl/release/deps/agent_radar-0b05c43506c19e11.agent_radar.7075b0d54afb5ac-cgu.2.rcgu.o",
+    "target/x86_64-unknown-linux-musl/release/deps/agent_radar-0b05c43506c19e11.agent_radar.7075b0d54afb5ac-cgu.0.rcgu.o",
+    "target/x86_64-unknown-linux-musl/release/deps/libagent_radar-e36077009da4c455.rlib",
+    "target/x86_64-unknown-linux-musl/release/deps/rustcKx9Ji3/lib.rmeta-link",
+    "target/x86_64-unknown-linux-musl/release/deps/rustcKx9Ji3/lib.rmeta",
+    "phases.md",
+    "docs/superpowers/specs/2026-10-03-category-expansion-design.md",
     "packaging/README.md",
     "README.md",
     "WORKFLOW.md",
     "AGENTS.md",
-    "phases.md",
     "Architecture.md",
     "memory.md",
     "design.md",

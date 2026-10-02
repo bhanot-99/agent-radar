@@ -17,6 +17,14 @@ use crate::watcher::EventSource;
 pub const TAG_INOTIFY: u64 = 1;
 pub const TAG_SIGNAL: u64 = 2;
 pub const TAG_TIMER: u64 = 3;
+pub const TAG_STDIN: u64 = 4;
+
+/// Raw-mode disables the TTY's ISIG processing, so Ctrl-C no longer generates
+/// SIGINT at the kernel level — it arrives as a plain 0x03 byte on stdin instead.
+/// We must read stdin ourselves and treat these bytes as an explicit quit request.
+pub fn is_quit_byte(b: u8) -> bool {
+    b == 0x03 || b == b'q' || b == b'Q'
+}
 
 pub struct AppRunner {
     epoll_fd: OwnedFd,
@@ -72,6 +80,17 @@ impl AppRunner {
             epoll::EventData::new_u64(TAG_TIMER),
             epoll::EventFlags::IN,
         ).map_err(io::Error::other)?;
+
+        // Register stdin so Ctrl-C / 'q' keypresses can be read and handled
+        // explicitly once raw mode disables the TTY's normal SIGINT generation.
+        if !debug_mode {
+            epoll::add(
+                &epoll_fd,
+                unsafe { rustix::fd::BorrowedFd::borrow_raw(0) },
+                epoll::EventData::new_u64(TAG_STDIN),
+                epoll::EventFlags::IN,
+            ).map_err(io::Error::other)?;
+        }
 
         let terminal = if !debug_mode {
             let mut stdout = io::stdout();
@@ -228,6 +247,17 @@ impl AppRunner {
                             state_changed = true;
                         }
                     }
+                    TAG_STDIN => {
+                        let mut buf = [0u8; 64];
+                        if let Ok(n) = rustix::io::read(unsafe { rustix::fd::BorrowedFd::borrow_raw(0) }, &mut buf) {
+                            if buf[..n].iter().any(|&b| is_quit_byte(b)) {
+                                if self.debug_mode {
+                                    eprintln!("[INFO] Keyboard quit received, terminating cleanly...");
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
                     TAG_INOTIFY => {
                         let raw_events = self.watcher.drain();
                         for raw in raw_events {
@@ -260,6 +290,25 @@ impl AppRunner {
             if state_changed {
                 self.redraw_if_needed()?;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_quit_byte;
+
+    #[test]
+    fn test_quit_byte_recognizes_ctrl_c_and_q() {
+        assert!(is_quit_byte(0x03)); // Ctrl-C (ETX)
+        assert!(is_quit_byte(b'q'));
+        assert!(is_quit_byte(b'Q'));
+    }
+
+    #[test]
+    fn test_quit_byte_ignores_other_input() {
+        for b in [b'a', b'z', b' ', b'\n', b'\r', 0x1b, 0x00, 0xff] {
+            assert!(!is_quit_byte(b), "byte {:#x} should not trigger quit", b);
         }
     }
 }

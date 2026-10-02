@@ -35,6 +35,8 @@ pub struct PendingDebounce {
 pub struct SemanticClassifier {
     debounce_map: HashMap<PathBuf, PendingDebounce>,
     pending_renames: HashMap<u32, (PathBuf, EnrichedEvent, Instant)>,
+    delete_burst: Vec<(PathBuf, EnrichedEvent)>,
+    burst_last_seen: Option<Instant>,
     rate_trackers: LruCache<PathBuf, RateTrackerEntry>,
     line_counts: LruCache<PathBuf, usize>,
 }
@@ -44,23 +46,32 @@ impl SemanticClassifier {
         Self {
             debounce_map: HashMap::new(),
             pending_renames: HashMap::new(),
+            delete_burst: Vec::new(),
+            burst_last_seen: None,
             rate_trackers: LruCache::new(NonZeroUsize::new(RATE_TRACKERS_CAPACITY).unwrap()),
             line_counts: LruCache::new(NonZeroUsize::new(RATE_TRACKERS_CAPACITY).unwrap()),
         }
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.debounce_map.is_empty()
+        !self.debounce_map.is_empty() || !self.delete_burst.is_empty()
     }
 
     pub fn time_until_next_flush(&self, window: Duration) -> Option<Duration> {
-        if self.debounce_map.is_empty() {
+        if self.debounce_map.is_empty() && self.delete_burst.is_empty() {
             return None;
         }
         let now = Instant::now();
         let mut min_wait = window;
         for item in self.debounce_map.values() {
             let elapsed = now.duration_since(item.last_seen);
+            let remaining = window.saturating_sub(elapsed);
+            if remaining < min_wait {
+                min_wait = remaining;
+            }
+        }
+        if let Some(t) = self.burst_last_seen {
+            let elapsed = now.duration_since(t);
             let remaining = window.saturating_sub(elapsed);
             if remaining < min_wait {
                 min_wait = remaining;
@@ -99,10 +110,12 @@ impl SemanticClassifier {
             return Some(self.classify_direct(&enriched, &path, true, FileOp::Created));
         }
 
-        // 3. Deletion -> immediate FileMutation(Deleted)
+        // 3. Deletion -> buffer into delete_burst for MassDeletion detection
         if mask.contains(EventMask::DELETE) {
             self.debounce_map.remove(&path);
-            return Some(self.classify_direct(&enriched, &path, is_dir, FileOp::Deleted));
+            self.delete_burst.push((path, enriched));
+            self.burst_last_seen = Some(Instant::now());
+            return None;
         }
 
         // 4. Writes / modifies / creates -> enqueue into per-path debounce window
@@ -150,6 +163,39 @@ impl SemanticClassifier {
             }
         }
 
+        // MassDeletion burst detection:
+        if let Some(t) = self.burst_last_seen {
+            if now.duration_since(t) >= window {
+                if self.delete_burst.len() >= 5 {
+                    let first = &self.delete_burst[0].1;
+                    let sample_paths: Vec<String> = self.delete_burst
+                        .iter()
+                        .take(3)
+                        .map(|(p, _)| p.to_string_lossy().into_owned())
+                        .collect();
+                    results.push(TelemetryEvent {
+                        timestamp: first.timestamp,
+                        pid: first.pid.unwrap_or(0),
+                        ppid: first.ppid.unwrap_or(0),
+                        process_name: first.process_name.clone(),
+                        category: ActivityCategory::MassDeletion {
+                            count: self.delete_burst.len(),
+                            sample_paths,
+                        },
+                    });
+                } else {
+                    let buffered = std::mem::take(&mut self.delete_burst);
+                    for (del_path, del_enriched) in buffered {
+                        let is_dir = del_enriched.raw.mask.contains(EventMask::ISDIR);
+                        let ev = self.classify_direct(&del_enriched, &del_path, is_dir, FileOp::Deleted);
+                        results.push(ev);
+                    }
+                }
+                self.delete_burst.clear();
+                self.burst_last_seen = None;
+            }
+        }
+
         // Sweep expired unpaired renames (> 1s).
         // If a MOVED_FROM had no matching MOVED_TO, the file was moved out of the
         // watched workspace — classify it as a deletion!
@@ -189,17 +235,36 @@ impl SemanticClassifier {
         is_dir: bool,
         op: FileOp,
     ) -> TelemetryEvent {
-        let verdict = evaluate_rules(path, is_dir, op, enriched.active_network_stream);
+        let verdict = evaluate_rules(
+            path,
+            is_dir,
+            op,
+            enriched.active_network_stream,
+            enriched.is_git_process,
+        );
         let path_str = path.to_string_lossy().into_owned();
 
         let category = match verdict {
             RuleVerdict::WorkspaceExpansion => ActivityCategory::WorkspaceExpansion { path: path_str },
+            RuleVerdict::EnvSecretChange => ActivityCategory::EnvSecretChange { path: path_str },
+            RuleVerdict::ContainerConfigEdit => ActivityCategory::ContainerConfigEdit { path: path_str },
+            RuleVerdict::DependencyLockUpdate => ActivityCategory::DependencyLockUpdate { path: path_str },
+            RuleVerdict::CiPipelineEdit => ActivityCategory::CiPipelineEdit { path: path_str },
+            RuleVerdict::TestFileActivity => ActivityCategory::TestFileActivity { path: path_str },
+            RuleVerdict::GitOperation => ActivityCategory::GitOperation { path: path_str },
             RuleVerdict::ModelTrainingCheckpoint { size_bytes } => {
                 ActivityCategory::ModelTrainingCheckpoint {
                     path: path_str,
                     size_bytes,
                 }
             }
+            RuleVerdict::ModelConfigEdit => ActivityCategory::ModelConfigEdit { path: path_str },
+            RuleVerdict::ArchiveWrite => ActivityCategory::ArchiveWrite { path: path_str },
+            RuleVerdict::ImageAsset => ActivityCategory::ImageAsset { path: path_str },
+            RuleVerdict::AudioAsset => ActivityCategory::AudioAsset { path: path_str },
+            RuleVerdict::VideoAsset => ActivityCategory::VideoAsset { path: path_str },
+            RuleVerdict::FontAsset => ActivityCategory::FontAsset { path: path_str },
+            RuleVerdict::NotebookActivity => ActivityCategory::NotebookActivity { path: path_str },
             RuleVerdict::IncomingDataStream => {
                 use std::os::unix::fs::MetadataExt;
                 let (current_size, sparse_expected) = if let Ok(m) = fs::metadata(path) {
@@ -275,19 +340,37 @@ impl SemanticClassifier {
                     progress_pct,
                 }
             }
-            RuleVerdict::SourceCodeMutation => {
-                // Debounced line diff computation
-                let (lines_added, lines_removed) = if op == FileOp::Deleted {
-                    let prev_lines = self.line_counts.pop(path).unwrap_or(0);
-                    (0, prev_lines)
-                } else {
-                    self.compute_line_diff(path)
-                };
-                ActivityCategory::SourceCodeMutation {
-                    path: path_str,
-                    lines_added,
-                    lines_removed,
-                }
+            RuleVerdict::RustEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::RustEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::PythonEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::PythonEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::WebEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::WebEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::StyleEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::StyleEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::MarkupEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::MarkupEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::ConfigEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::ConfigEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::DocsEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::DocsEdit { path: path_str, lines_added, lines_removed }
+            }
+            RuleVerdict::ShellScriptEdit => {
+                let (lines_added, lines_removed) = self.diff_lines(path, op);
+                ActivityCategory::ShellScriptEdit { path: path_str, lines_added, lines_removed }
             }
             RuleVerdict::FileMutation(file_op) => ActivityCategory::FileMutation {
                 path: path_str,
@@ -301,6 +384,15 @@ impl SemanticClassifier {
             ppid: enriched.ppid.unwrap_or(0),
             process_name: enriched.process_name.clone(),
             category,
+        }
+    }
+
+    fn diff_lines(&mut self, path: &Path, op: FileOp) -> (usize, usize) {
+        if op == FileOp::Deleted {
+            let prev_lines = self.line_counts.pop(path).unwrap_or(0);
+            (0, prev_lines)
+        } else {
+            self.compute_line_diff(path)
         }
     }
 

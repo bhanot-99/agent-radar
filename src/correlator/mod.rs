@@ -39,6 +39,7 @@ pub struct EnrichedEvent {
     pub agent_ancestor: Option<String>,
     pub active_network_stream: bool,
     pub local_disk_mutation: bool,
+    pub is_git_process: bool,
 }
 
 pub struct ProcessCorrelator {
@@ -239,6 +240,7 @@ impl ProcessCorrelator {
 
         if let Some(pid) = effective_pid {
             if let Some(info) = self.get_or_resolve(pid) {
+                let is_git_process = info.name == "git";
                 return EnrichedEvent {
                     raw,
                     timestamp,
@@ -249,6 +251,7 @@ impl ProcessCorrelator {
                     agent_ancestor: info.agent_ancestor,
                     active_network_stream: info.has_socket,
                     local_disk_mutation: !info.has_socket,
+                    is_git_process,
                 };
             }
         }
@@ -264,6 +267,7 @@ impl ProcessCorrelator {
             agent_ancestor: None,
             active_network_stream: false,
             local_disk_mutation: true,
+            is_git_process: false,
         }
     }
 }
