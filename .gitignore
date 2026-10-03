@@ -3,6 +3,7 @@
 # Root-level planning/notes docs are kept locally but not published.
 /*.md
 !/README.md
+/docs/
 
 # Personal editor/tooling state — not part of the package.
 /.obsidian/
