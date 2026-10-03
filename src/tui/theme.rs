@@ -16,15 +16,6 @@ pub const ACCENT_FILE_MUTATION: Color = Color::Rgb(0x7A, 0x8B, 0xA6);
 pub const ACCENT_IDLE: Color = Color::Rgb(0x3A, 0x42, 0x54);
 pub const ACCENT_WARNING: Color = Color::Rgb(0xFF, 0x5A, 0x3C);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnimationPrimitive {
-    PulseDot,
-    FlowArrow,
-    BounceBar,
-    Spinner,
-    Wave,
-}
-
 #[derive(Debug, Clone)]
 pub struct CategoryVisual {
     pub glyph_a: char,
@@ -32,7 +23,6 @@ pub struct CategoryVisual {
     pub caption: &'static str,
     pub label: &'static str,
     pub color: Color,
-    pub primitive: AnimationPrimitive,
 }
 
 pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
@@ -44,7 +34,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "NEURAL INK FLOWING",
             label: "RUST_EDIT",
             color: Color::Rgb(0x39, 0xFF, 0x88),
-            primitive: AnimationPrimitive::Wave,
         },
         ActivityCategory::PythonEdit { .. } => CategoryVisual {
             glyph_a: '≈',
@@ -52,7 +41,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "PYTHON ON THE PROWL",
             label: "PYTHON_EDIT",
             color: Color::Rgb(0xC9, 0xD9, 0x4A),
-            primitive: AnimationPrimitive::FlowArrow,
         },
         ActivityCategory::WebEdit { .. } => CategoryVisual {
             glyph_a: '✦',
@@ -60,7 +48,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "WEB SPUN TIGHTER",
             label: "WEB_EDIT",
             color: Color::Rgb(0xFF, 0xD1, 0x66),
-            primitive: AnimationPrimitive::Spinner,
         },
         ActivityCategory::StyleEdit { .. } => CategoryVisual {
             glyph_a: '❖',
@@ -68,7 +55,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "PIXELS GETTING PAINTED",
             label: "STYLE_EDIT",
             color: Color::Rgb(0xFF, 0x6F, 0xB5),
-            primitive: AnimationPrimitive::Wave,
         },
         ActivityCategory::MarkupEdit { .. } => CategoryVisual {
             glyph_a: '▦',
@@ -76,7 +62,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SCAFFOLDING RAISED",
             label: "MARKUP_EDIT",
             color: Color::Rgb(0xE8, 0x70, 0x2A),
-            primitive: AnimationPrimitive::BounceBar,
         },
         ActivityCategory::ConfigEdit { .. } => CategoryVisual {
             glyph_a: '⚙',
@@ -84,7 +69,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "BOLTS BEING TIGHTENED",
             label: "CONFIG_EDIT",
             color: Color::Rgb(0x9A, 0xA7, 0xB8),
-            primitive: AnimationPrimitive::PulseDot,
         },
         ActivityCategory::DocsEdit { .. } => CategoryVisual {
             glyph_a: '✎',
@@ -92,7 +76,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SCRIBE AT WORK",
             label: "DOCS_EDIT",
             color: Color::Rgb(0xD8, 0xC2, 0x8A),
-            primitive: AnimationPrimitive::PulseDot,
         },
         ActivityCategory::ShellScriptEdit { .. } => CategoryVisual {
             glyph_a: '$',
@@ -100,7 +83,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SHELL INCANTATION CAST",
             label: "SHELL_EDIT",
             color: Color::Rgb(0x5C, 0xF0, 0xC2),
-            primitive: AnimationPrimitive::Spinner,
         },
 
         // Group B — Data & Media
@@ -110,7 +92,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "CANVAS SPLATTERED",
             label: "IMAGE_ASSET",
             color: Color::Rgb(0xFF, 0x8A, 0xD8),
-            primitive: AnimationPrimitive::Wave,
         },
         ActivityCategory::AudioAsset { .. } => CategoryVisual {
             glyph_a: '♪',
@@ -118,7 +99,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SOUNDWAVE RIPPLING",
             label: "AUDIO_ASSET",
             color: Color::Rgb(0x8A, 0xD8, 0xFF),
-            primitive: AnimationPrimitive::Wave,
         },
         ActivityCategory::VideoAsset { .. } => CategoryVisual {
             glyph_a: '▶',
@@ -126,7 +106,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "REEL ROLLING",
             label: "VIDEO_ASSET",
             color: Color::Rgb(0xB5, 0x8A, 0xFF),
-            primitive: AnimationPrimitive::Spinner,
         },
         ActivityCategory::FontAsset { .. } => CategoryVisual {
             glyph_a: 'Æ',
@@ -134,7 +113,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "GLYPHS FORGED",
             label: "FONT_ASSET",
             color: Color::Rgb(0xFF, 0xD9, 0x8A),
-            primitive: AnimationPrimitive::PulseDot,
         },
         ActivityCategory::NotebookActivity { .. } => CategoryVisual {
             glyph_a: '≡',
@@ -142,7 +120,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "LAB NOTEBOOK SCRIBBLED",
             label: "NOTEBOOK",
             color: Color::Rgb(0x8A, 0xFF, 0xC2),
-            primitive: AnimationPrimitive::BounceBar,
         },
 
         // Group C — AI/ML
@@ -152,7 +129,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "TENSOR FLUSH IN PROGRESS",
             label: "CHECKPOINT",
             color: Color::Rgb(0xB2, 0x4B, 0xFF),
-            primitive: AnimationPrimitive::BounceBar,
         },
         ActivityCategory::ModelConfigEdit { .. } => CategoryVisual {
             glyph_a: '≈',
@@ -160,7 +136,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SYNAPSES REWIRED",
             label: "MODEL_CONFIG",
             color: Color::Rgb(0xD4, 0x8B, 0xFF),
-            primitive: AnimationPrimitive::Spinner,
         },
 
         // Group D — Network / Transfer
@@ -170,7 +145,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SIGNAL BEING SUCKED DOWN",
             label: "DATA_STREAM",
             color: Color::Rgb(0x00, 0xF0, 0xFF),
-            primitive: AnimationPrimitive::FlowArrow,
         },
         ActivityCategory::ArchiveWrite { .. } => CategoryVisual {
             glyph_a: '▪',
@@ -178,7 +152,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "BOX TAPED SHUT",
             label: "ARCHIVE_WRITE",
             color: Color::Rgb(0x4F, 0xA8, 0xE8),
-            primitive: AnimationPrimitive::PulseDot,
         },
 
         // Group E — Process / Action-based
@@ -188,23 +161,20 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "TIMELINE BRANCHING",
             label: "GIT_OP",
             color: Color::Rgb(0xFF, 0x8C, 0x42),
-            primitive: AnimationPrimitive::FlowArrow,
         },
         ActivityCategory::DependencyLockUpdate { .. } => CategoryVisual {
             glyph_a: '≡',
-            glyph_b: '⚓',
+            glyph_b: '◆',
             caption: "ANCHOR CHAIN RATTLING",
             label: "LOCK_UPDATE",
             color: Color::Rgb(0x6B, 0x8C, 0xFF),
-            primitive: AnimationPrimitive::Spinner,
         },
         ActivityCategory::TestFileActivity { .. } => CategoryVisual {
-            glyph_a: '✓',
-            glyph_b: '✗',
+            glyph_a: '■',
+            glyph_b: '□',
             caption: "BUG HUNT IN PROGRESS",
             label: "TEST_ACTIVITY",
             color: Color::Rgb(0xFF, 0xA1, 0x3C),
-            primitive: AnimationPrimitive::BounceBar,
         },
         ActivityCategory::EnvSecretChange { .. } => CategoryVisual {
             glyph_a: '▓',
@@ -212,7 +182,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "VAULT DOOR CREAKING",
             label: "ENV_SECRET",
             color: Color::Rgb(0xFF, 0x3C, 0x6E),
-            primitive: AnimationPrimitive::PulseDot,
         },
         ActivityCategory::CiPipelineEdit { .. } => CategoryVisual {
             glyph_a: '⚙',
@@ -220,7 +189,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "ROBOT ARMS RECALIBRATED",
             label: "CI_PIPELINE",
             color: Color::Rgb(0x8A, 0x8A, 0xFF),
-            primitive: AnimationPrimitive::Spinner,
         },
         ActivityCategory::ContainerConfigEdit { .. } => CategoryVisual {
             glyph_a: '▢',
@@ -228,7 +196,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "WHALE SURFACING",
             label: "CONTAINER_CFG",
             color: Color::Rgb(0x3C, 0x9A, 0xFF),
-            primitive: AnimationPrimitive::Wave,
         },
 
         // Group F — Structural
@@ -238,7 +205,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "NEW WING UNDER CONSTRUCTION",
             label: "EXPANSION",
             color: Color::Rgb(0xFF, 0xC2, 0x47),
-            primitive: AnimationPrimitive::BounceBar,
         },
         ActivityCategory::MassDeletion { .. } => CategoryVisual {
             glyph_a: '✕',
@@ -246,7 +212,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "CONTROLLED DEMOLITION",
             label: "MASS_DELETION",
             color: Color::Rgb(0xFF, 0x2E, 0x2E),
-            primitive: AnimationPrimitive::BounceBar,
         },
         ActivityCategory::FileMutation { .. } => CategoryVisual {
             glyph_a: '•',
@@ -254,7 +219,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SOMETHING STIRRED",
             label: "FILE_MUTATION",
             color: Color::Rgb(0x7A, 0x8B, 0xA6),
-            primitive: AnimationPrimitive::Spinner,
         },
 
         // System state
@@ -264,7 +228,6 @@ pub fn category_visual(cat: &ActivityCategory) -> CategoryVisual {
             caption: "SYSTEM QUIET",
             label: "IDLE",
             color: Color::Rgb(0x3A, 0x42, 0x54),
-            primitive: AnimationPrimitive::PulseDot,
         },
     }
 }

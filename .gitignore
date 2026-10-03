@@ -1,1 +1,11 @@
 /target
+
+# Root-level planning/notes docs are kept locally but not published.
+/*.md
+!/README.md
+
+# Personal editor/tooling state — not part of the package.
+/.obsidian/
+/.agents/
+/.gsd-path/
+/skills-lock.json

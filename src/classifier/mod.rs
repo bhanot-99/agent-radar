@@ -33,6 +33,7 @@ pub struct PendingDebounce {
 }
 
 pub struct SemanticClassifier {
+    watch_root: PathBuf,
     debounce_map: HashMap<PathBuf, PendingDebounce>,
     pending_renames: HashMap<u32, (PathBuf, EnrichedEvent, Instant)>,
     delete_burst: Vec<(PathBuf, EnrichedEvent)>,
@@ -42,8 +43,9 @@ pub struct SemanticClassifier {
 }
 
 impl SemanticClassifier {
-    pub fn new() -> Self {
+    pub fn new(watch_root: PathBuf) -> Self {
         Self {
+            watch_root,
             debounce_map: HashMap::new(),
             pending_renames: HashMap::new(),
             delete_burst: Vec::new(),
@@ -241,6 +243,7 @@ impl SemanticClassifier {
             op,
             enriched.active_network_stream,
             enriched.is_git_process,
+            &self.watch_root,
         );
         let path_str = path.to_string_lossy().into_owned();
 
@@ -418,7 +421,7 @@ impl SemanticClassifier {
 
 impl Default for SemanticClassifier {
     fn default() -> Self {
-        Self::new()
+        Self::new(PathBuf::new())
     }
 }
 

@@ -45,7 +45,7 @@ impl AppRunner {
         let watcher = InotifyWatcher::new(watch_path)?;
         let signal_pipes = SignalPipes::new()?;
         let correlator = ProcessCorrelator::new();
-        let classifier = SemanticClassifier::new();
+        let classifier = SemanticClassifier::new(watch_path.to_path_buf());
         let is_budget_exceeded = watcher.is_budget_exceeded();
         let tui_state = TuiState::new(&watch_path.to_string_lossy(), is_budget_exceeded);
 
@@ -163,10 +163,9 @@ impl AppRunner {
     }
 
     fn check_hero_animation_state(&mut self) -> io::Result<()> {
-        if self.tui_state.is_animating() {
+        if self.tui_state.wants_frames() {
             if !self.is_timer_armed {
-                // Arm timer for 250ms animation frames
-                self.arm_timer(250)?;
+                self.arm_timer(crate::tui::scenes::ANIM_FRAME_MS)?;
             }
         } else if self.is_timer_armed {
             // Disarm timer to allow epoll to sleep at ~0% CPU

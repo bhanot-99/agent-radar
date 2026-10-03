@@ -42,9 +42,13 @@ pub enum RuleVerdict {
     FileMutation(FileOp),
 }
 
-pub fn is_checkpoint_path_context(path: &Path) -> bool {
-    // 1. Check directory path components for checkpoint / weights / models
-    for comp in path.components() {
+pub fn is_checkpoint_path_context(path: &Path, watch_root: &Path) -> bool {
+    // 1. Check directory path components for checkpoint / weights / models —
+    //    scoped to the watched project tree only, so a watch root (or any of
+    //    its ancestors) merely being named e.g. "my-model-experiments" doesn't
+    //    make every single file in the project match.
+    let scan_path = path.strip_prefix(watch_root).unwrap_or(path);
+    for comp in scan_path.components() {
         if let std::path::Component::Normal(c) = comp {
             let s = c.to_string_lossy().to_lowercase();
             if s.contains("checkpoint") || s.contains("weight") || s.contains("model") {
@@ -79,6 +83,7 @@ pub fn evaluate_rules(
     op: FileOp,
     active_network_stream: bool,
     is_git_process: bool,
+    watch_root: &Path,
 ) -> RuleVerdict {
     // 1. Directory creation -> WorkspaceExpansion (highest priority)
     if is_dir && op == FileOp::Created {
@@ -90,6 +95,12 @@ pub fn evaluate_rules(
         .map(|f| f.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     let path_str_lower = path.to_string_lossy().to_lowercase();
+    // All path-component scans below (test-path, checkpoint-context) must only
+    // look inside the watched project tree — never at the watch root's own
+    // name or its ancestors (e.g. a project simply named "test" or living
+    // under "~/my-model-experiments/"), or every file in the project would
+    // false-match on that one coincidental directory name.
+    let scan_path = path.strip_prefix(watch_root).unwrap_or(path);
 
     // 2. Filename-exact matches (checked before any extension logic)
     // EnvSecretChange: .env or starts with .env.
@@ -131,7 +142,7 @@ pub fn evaluate_rules(
     let is_test_file = file_name.starts_with("test_")
         || file_name.contains("_test.")
         || file_name.contains(".spec.");
-    let is_test_path = path.components().any(|c| {
+    let is_test_path = scan_path.components().any(|c| {
         if let std::path::Component::Normal(comp) = c {
             let s = comp.to_string_lossy().to_lowercase();
             s == "tests" || s == "test"
@@ -160,7 +171,7 @@ pub fn evaluate_rules(
 
     // 6. .bin disambiguation via path context predicates
     if file_name.ends_with(".bin") {
-        if is_checkpoint_path_context(path) {
+        if is_checkpoint_path_context(path, watch_root) {
             let size_bytes = get_file_size(path);
             return RuleVerdict::ModelTrainingCheckpoint { size_bytes };
         } else if active_network_stream {
@@ -172,7 +183,7 @@ pub fn evaluate_rules(
 
     // 7. Model-config context (.json, .yaml, .yml in checkpoint path context)
     if (file_name.ends_with(".json") || file_name.ends_with(".yaml") || file_name.ends_with(".yml"))
-        && is_checkpoint_path_context(path)
+        && is_checkpoint_path_context(path, watch_root)
     {
         return RuleVerdict::ModelConfigEdit;
     }

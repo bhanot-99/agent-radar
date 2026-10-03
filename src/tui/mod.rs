@@ -1,3 +1,4 @@
+pub mod scenes;
 pub mod theme;
 pub mod unicode_util;
 pub mod widgets {
@@ -70,6 +71,8 @@ pub struct TuiState {
     pub active_agent: Option<String>,
     pub watch_path: String,
     pub is_budget_exceeded: bool,
+    /// Frame counter for the idle sentinel scene, which animates too.
+    pub idle_frame: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +139,7 @@ impl TuiState {
             active_agent: None,
             watch_path: watch_path.to_string(),
             is_budget_exceeded,
+            idle_frame: 0,
         };
         state.push_event(TelemetryEvent {
             timestamp: std::time::SystemTime::now(),
@@ -206,9 +210,19 @@ impl TuiState {
                     category: crate::events::ActivityCategory::SystemIdle,
                 });
                 state_changed = true;
+            } else {
+                // The idle radar keeps sweeping.
+                self.idle_frame = self.idle_frame.wrapping_add(1);
+                state_changed = true;
             }
         }
         state_changed
+    }
+
+    /// Whether the frame timer should run. Every hero scene -- including the
+    /// idle sentinel -- is a continuously moving dot animation.
+    pub fn wants_frames(&self) -> bool {
+        self.active_hero.is_some()
     }
 
     pub fn is_animating(&self) -> bool {
@@ -254,14 +268,18 @@ fn read_self_rss() -> Option<u64> {
     None
 }
 
-pub fn render_hud(f: &mut Frame, state: &TuiState) {
-    let size = f.area();
+/// The four fixed regions of the HUD for a given terminal size: header and
+/// footer are fixed-height; hero (top, ~70%) and log (bottom, ~30%) stack
+/// vertically and are both full terminal width. Exposed so tests can assert
+/// exact widget placement without duplicating the layout math.
+pub struct HudRegions {
+    pub header: Rect,
+    pub hero: Rect,
+    pub log: Rect,
+    pub footer: Rect,
+}
 
-    // Background fill
-    let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(BG_BASE));
-    f.render_widget(bg_block, size);
-
-    // Main layout: Header (3), Main (min 10), Footer (1)
+pub fn compute_regions(size: Rect) -> HudRegions {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -271,37 +289,54 @@ pub fn render_hud(f: &mut Frame, state: &TuiState) {
         ])
         .split(size);
 
+    let middle_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(70),
+            Constraint::Percentage(30),
+        ])
+        .split(chunks[1]);
+
+    HudRegions {
+        header: chunks[0],
+        hero: middle_chunks[0],
+        log: middle_chunks[1],
+        footer: chunks[2],
+    }
+}
+
+pub fn render_hud(f: &mut Frame, state: &TuiState) {
+    let size = f.area();
+
+    // Background fill
+    let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(BG_BASE));
+    f.render_widget(bg_block, size);
+
+    let regions = compute_regions(size);
+
     // 1. Header Bar
     let header_widget = HeaderBarWidget {
         watch_path: &state.watch_path,
         active_agent: state.active_agent.as_deref(),
         is_budget_exceeded: state.is_budget_exceeded,
     };
-    f.render_widget(header_widget, chunks[0]);
+    f.render_widget(header_widget, regions.header);
 
-    // 2. Middle area: Split Hero Card (Left, ~38%) vs Log Feed (Right, ~62%)
-    let middle_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(38),
-            Constraint::Percentage(62),
-        ])
-        .split(chunks[1]);
-
-    // Left: Hero Stream
+    // 2. Hero Stream (top, ~70%, full width)
     let hero_widget = HeroStreamWidget {
         active_hero: state.active_hero.as_ref(),
+        idle_frame: state.idle_frame,
     };
-    f.render_widget(hero_widget, middle_chunks[0]);
+    f.render_widget(hero_widget, regions.hero);
 
-    // Right: Log Feed Table
+    // 3. Log Feed Table (bottom, ~30%, full width)
     let log_widget = LogFeedTableWidget {
         events: &state.events,
     };
-    f.render_widget(log_widget, middle_chunks[1]);
+    f.render_widget(log_widget, regions.log);
 
-    // 3. Footer: Self resource telemetry
-    render_footer(f, chunks[2], state);
+    // 4. Footer: Self resource telemetry
+    render_footer(f, regions.footer, state);
 }
 
 fn render_footer(f: &mut Frame, area: Rect, state: &TuiState) {

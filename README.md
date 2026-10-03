@@ -77,21 +77,35 @@ tmux split-window -h -p 35 "agent-radar"
 curl -fsSL https://raw.githubusercontent.com/agent-radar/agent-radar/main/install.sh | sh
 ```
 
-### Option 2: Cargo (From Source)
+### Option 2: Build From Source (git clone)
 ```bash
-cargo install --path .
+git clone https://github.com/agent-radar/agent-radar.git
+cd agent-radar
+cargo build --release
+./install.sh    # copies target/release/agent-radar onto your PATH
 ```
 
-### Option 3: Arch Linux (AUR)
+### Option 3: Cargo (Directly From GitHub)
+```bash
+cargo install --git https://github.com/agent-radar/agent-radar.git
+```
+
+### Option 4: Arch Linux (AUR)
 ```bash
 yay -S agent-radar-bin
 ```
 
-### Option 4: Static Musl Binary Build
+### Option 5: Static Musl Binary Build
 ```bash
 # Build fully static PIE binary with zero dynamic library dependencies
+rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl
 ```
+
+### Requirements
+
+- Linux (uses `inotify` + `/proc`) — x86_64 or aarch64
+- Rust 1.75+ (only needed when building from source)
 
 ---
 
@@ -135,6 +149,22 @@ Empirically verified on Linux x86_64:
 
 ---
 
-## 7. License
+## 7. Development
+
+```bash
+git clone https://github.com/agent-radar/agent-radar.git
+cd agent-radar
+cargo build              # debug build
+cargo test                # unit + integration test suite
+cargo run --release --example scene_gallery   # browse every hero-card animation
+```
+
+Distro packaging manifests (AUR, `.deb`, RPM) live under [`packaging/`](packaging/README.md).
+
+## 8. Contributing
+
+Issues and pull requests are welcome. Please run `cargo test` and `cargo build --release` before opening a PR.
+
+## 9. License
 
 Licensed under the [MIT License](LICENSE).
